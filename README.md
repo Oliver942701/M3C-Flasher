@@ -31,9 +31,11 @@ Bosch GmbH or any other trademark mentioned.
 - ✅ **Tested and working on one (1) M3C ECU only.** Other ECU variants,
   model years or software versions may behave differently. If you test it
   on another ECU, please open an issue and report the result.
-- ❌ **No checksum correction yet.** The tool writes the file exactly as
-  given. If you modify a file (e.g. in TunerPro), you must correct the
-  checksum yourself before writing, otherwise the ECU may not start.
+- ✅ **Checksum correction is available as a separate program**
+  ([`tools/m3c_checksum_gui.py`](tools/m3c_checksum_gui.py)). The flasher
+  itself still writes the file exactly as given, so if you modify a file
+  (e.g. in TunerPro), **run it through the checksum tool before writing**,
+  otherwise the ECU may not start. See [Checksum correction](#checksum-correction).
 
 ## Hardware
 
@@ -81,6 +83,8 @@ firmware/
   webui.h               - WiFi/phone web interface (Connect/Read/Write/SD files)
 gui/
   ktm_m3c_flasher_gui.py - Desktop Python/Tkinter GUI (over USB Serial)
+tools/
+  m3c_checksum_gui.py    - Standalone checksum checker/fixer (Python/Tkinter)
 ```
 
 ## Protocol summary
@@ -113,6 +117,29 @@ read-back matches byte for byte.
    `M3C_Flasher` (password `flasher123`) and open `192.168.4.1` in a browser.
 3. Press CONNECT, then READ FLASH before attempting any write.
 
+## Checksum correction
+
+The M3C flash contains several checksum blocks. Each one starts with
+`FF FF FF FF`, followed by a big-endian **CRC-16/MODBUS** and a list of the
+address ranges it covers. A 256 KB read has four of them; a tune normally
+only changes the calibration block at `0x6804`.
+
+`tools/m3c_checksum_gui.py` checks and fixes them. It uses only the Python
+standard library (no `pip install` needed):
+
+1. Run `python tools/m3c_checksum_gui.py` (or double-click it on Windows).
+2. **Open file** and select your `.bin`. The panel turns **green** (checksum
+   OK) or **red** (checksum needs correcting).
+3. If red, press **Recalculate CHK**, then **Save**. The tool re-checks every
+   block after fixing and refuses to continue if anything is still wrong.
+4. Upload the saved file to the SD card and write it to the ECU.
+
+> Tip: open your **unmodified original read** first. It should show green.
+> If it doesn't, please open an issue before writing anything.
+
+An in-browser version (no installation) is also available from NetworkDir:
+[networkdir.github.io/moto-ecu-checksum](https://networkdir.github.io/moto-ecu-checksum/).
+
 ## Contributing
 
 Help is very welcome! You can contribute in several ways:
@@ -128,7 +155,7 @@ Help is very welcome! You can contribute in several ways:
 
 Areas where help is especially needed:
 
-- **Checksum correction** for modified files
+- Built-in checksum correction directly in the flasher (currently a separate program)
 - Support and testing on **other M3C variants / model years**
 - Confirming the **DTC / Live Data** commands with real CAN logs
 
@@ -146,5 +173,8 @@ See [LICENSE](LICENSE).
 All code in this project was written with [Claude AI](https://claude.ai).
 CAN bus logging and hardware testing were done by
 [Oliver942701](https://github.com/Oliver942701).
+The M3C checksum algorithm was identified by
+[NetworkDir](https://github.com/NetworkDir) - see
+[moto-ecu-checksum](https://github.com/NetworkDir/moto-ecu-checksum).
 
 <sub>Powered by [Claude AI](https://claude.ai)</sub>
