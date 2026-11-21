@@ -1,0 +1,150 @@
+# KTM Husqvarna GasGas M3C Flasher
+
+An ESP32-based tool for reading and writing the Continental/Bosch **M3C** ECU
+(MC9S12-based) used on KTM/Husqvarna/GasGas TPI models over the CAN bus,
+without commercial flashing software.
+
+The protocol is fully **reverse-engineered**: it was reconstructed by sniffing
+CAN bus traffic (SavvyCAN + CANable v2) while a commercial tool was running,
+not from documentation (no official documentation is publicly available).
+
+> ⚠️ **WARNING: READ BEFORE USE**
+>
+> This is a hobby project, not an official or supported tool. Writing ECU
+> flash is **irreversible and can permanently damage ("brick") your
+> motorcycle's ECU**. The author(s) accept no liability for any damage
+> resulting from the use of this tool. Use entirely at your own risk.
+>
+> - Always do a **READ** first and store the original file safely before
+>   any write.
+> - Do not interrupt power during a write.
+> - The diagnostic (DTC/Live Data) commands are **best guesses**, not
+>   confirmed from a CAN log (see below).
+
+This project is not affiliated with or endorsed by KTM AG, Continental AG,
+Bosch GmbH or any other trademark mentioned.
+
+---
+
+## Project status
+
+- ✅ **Tested and working on one (1) M3C ECU only.** Other ECU variants,
+  model years or software versions may behave differently. If you test it
+  on another ECU, please open an issue and report the result.
+- ❌ **No checksum correction yet.** The tool writes the file exactly as
+  given. If you modify a file (e.g. in TunerPro), you must correct the
+  checksum yourself before writing, otherwise the ECU may not start.
+
+## Hardware
+
+- ESP32-S3 (or another ESP32 with a CAN transceiver)
+- 3.3 V CAN transceiver (e.g. SN65HVD230), connected to the ECU CAN-H/CAN-L
+  lines (500 kbit/s)
+- SD card module (SPI)
+- 12 V power supply for the ECU (battery or bench PSU)
+- (optional) WiFi for the phone/web interface
+
+## Wiring
+
+![Wiring diagram](docs/wiring.png)
+
+**ECU connector A** (front view, pins marked in the diagram):
+
+| ECU pin | Function |
+|---------|----------|
+| B1 | CAN-H |
+| C1 | CAN-L |
+| A4, B4 | +12 V (also acts as ignition, no separate ignition pin needed) |
+| M4 | GND |
+
+**ESP32 pins** (defined at the top of `firmware/ktm_m3c_flasher.ino`):
+
+| ESP32 | Connects to |
+|-------|-------------|
+| GPIO 4 (`CAN_TX`) | Transceiver TX / CTX |
+| GPIO 5 (`CAN_RX`) | Transceiver RX / CRX |
+| GPIO 15 | SD card CS |
+| GPIO 18 | SD card SCK |
+| GPIO 17 | SD card MISO |
+| GPIO 16 | SD card MOSI |
+
+> ESP32/transceiver GND **must** be connected to the ECU GND (M4),
+> otherwise CAN communication will not work.
+
+## Structure
+
+```
+firmware/
+  ktm_m3c_flasher.ino   - Main Arduino sketch (CAN protocol, Connect/Read/Write)
+  blocks.h              - Calibration blocks written to the ECU during Connect
+  diagnostics.h         - DTC/Live Data (BEST GUESS, unconfirmed - see warning in file)
+  webui.h               - WiFi/phone web interface (Connect/Read/Write/SD files)
+gui/
+  ktm_m3c_flasher_gui.py - Desktop Python/Tkinter GUI (over USB Serial)
+```
+
+## Protocol summary
+
+Everything below has been verified against CAN logs at the transaction level,
+with no dropped frames. See the code comments in `ktm_m3c_flasher.ino` for
+details.
+
+- **Diagnostic request/response ID:** `0x7E0` / `0x7E8`
+- **CONNECT:** session (0x3E) → read ECU ID (VIN/Cal/Date/Ver, service
+  0x1A) → security access seed/key (0x7D) → write 36 calibration blocks →
+  second seed/key confirmation → 3× closing handshake
+- **READ:** `52 00 PAGE COUNTER 00 01 00 00` for each 256-byte address,
+  1024 addresses in total (4 pages × 256), response is 32×8 raw frames
+- **WRITE:** 5 phases: erase Section 1 (128×`45`) → write Section 1
+  (512×`02`+`57` pairs) → erase Section 2 → write Section 2 →
+  end session (`01 00 00 02 01`)
+- **"Disconnect":** there is no software command; the ECU state is only reset
+  by a physical power cycle (same as the commercial software)
+
+The write protocol has been tested on hardware: a full 256KB write +
+read-back matches byte for byte.
+
+## Usage
+
+1. Open the `firmware/` folder in the Arduino IDE, select the ESP32-S3 board
+   and upload.
+2. Either connect over USB and run `gui/ktm_m3c_flasher_gui.py`
+   (`pip install pyserial`), or connect your phone to the WiFi network
+   `M3C_Flasher` (password `flasher123`) and open `192.168.4.1` in a browser.
+3. Press CONNECT, then READ FLASH before attempting any write.
+
+## Contributing
+
+Help is very welcome! You can contribute in several ways:
+
+- **Report test results:** tried it on another ECU or bike? Open an
+  [issue](../../issues) with the bike model, year, ECU software version and
+  whether Connect/Read/Write worked.
+- **Report bugs:** open an issue describing what happened, ideally with the
+  Serial log output.
+- **Fix or improve the code:** fork the repository, make your changes and
+  open a [pull request](../../pulls). Please describe what you changed and
+  how you tested it.
+
+Areas where help is especially needed:
+
+- **Checksum correction** for modified files
+- Support and testing on **other M3C variants / model years**
+- Confirming the **DTC / Live Data** commands with real CAN logs
+
+> ⚠️ Please do **not** upload full ECU dumps (`.bin`) or raw CAN logs to
+> issues. They can contain your VIN and other identifying data.
+
+## License
+
+See [LICENSE](LICENSE).
+
+---
+
+## Credits
+
+All code in this project was written with [Claude AI](https://claude.ai).
+CAN bus logging and hardware testing were done by
+[Oliver942701](https://github.com/Oliver942701).
+
+<sub>Powered by [Claude AI](https://claude.ai)</sub>
