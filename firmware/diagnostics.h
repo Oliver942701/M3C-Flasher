@@ -2,27 +2,27 @@
 #define DIAGNOSTICS_H
 
 // =====================================================================
-// DIAGNOSTICS MODULE — DTC (fault codes) and Live Data
+// DIAGNOSTICS MODULE - DTC (trouble codes) and Live Data
 //
-// WARNING: these commands are a BEST GUESS based on standard KWP2000 (ISO 14230)
-// services, NOT confirmed from a real CAN log (unlike 0x52
-// read and 0x45/0x02/0x57 write, which are 100% verified).
-// This ECU uses custom/non-standard commands in many places -
-// so it's quite possible that these same DTC/Live Data commands
-// will NOT work as-is.
+// WARNING: these commands are a BEST GUESS based on standard KWP2000
+// (ISO 14230) services, NOT confirmed from a real CAN log (unlike the
+// 0x52 read and 0x45/0x37 write commands, which are 100% verified).
+// This ECU uses custom/non-standard commands in many places (0x7D
+// security, 0x52/0x45 read/write) - so it is very possible that these
+// DTC/Live Data commands DO NOT work as-is.
 //
-// If you get a CAN log from the commercial tool (or another tool) during DTC
-// read/clear and Live Data viewing, these commands can be replaced here
-// with confirmed, correct ones - exactly the way the Read/Write
-// protocols in this project were confirmed.
+// Once a CAN log from Flex (or another tool) is captured while reading/
+// clearing DTCs and viewing Live Data, these commands can be replaced
+// here with the confirmed correct ones - exactly as was done for the
+// 0x52 (read) and 0x45/0x37 (write) commands.
 // =====================================================================
 
-// ---- DTC read (ASSUMPTION: KWP2000 service 0x18 ReadDTCByStatus) ----
+// ---- DTC read (GUESS: KWP2000 service 0x18 ReadDTCByStatus) ----
 void readDTCs() {
   Serial.println("STEP:DTC_READ_START");
 
   uint8_t resp[8];
-  // 18 00 FF 00 - "read all DTCs, any status" (assumed format)
+  // 18 00 FF 00 - "read all DTCs, any status" (guessed format)
   send8(0x03, 0x18, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00);
   if (!waitResponse(resp, 1000)) {
     Serial.println("ERR:DTC_NO_RESP");
@@ -30,7 +30,7 @@ void readDTCs() {
     return;
   }
 
-  // If the response is a multi-frame ISO-TP FF, read it in full
+  // If the response is an ISO-TP First Frame (multi-frame), read it in full
   int count = 0;
   if (resp[0] == 0x10) {
     uint16_t len = ((resp[0] & 0x0F) << 8) | resp[1];
@@ -43,7 +43,7 @@ void readDTCs() {
       if (!waitResponse(cf, 500)) break;
       for (int i = 1; i < 8 && idx < len; i++) buf[idx++] = cf[i];
     }
-    // DTC entries are usually 3 bytes (2 bytes code + 1 byte status)
+    // DTC records are usually 3 bytes (2 bytes code + 1 byte status)
     for (int i = 3; i + 2 < idx; i += 3) {  // the first bytes are usually a header
       uint16_t code = (buf[i] << 8) | buf[i + 1];
       uint8_t status = buf[i + 2];
@@ -69,12 +69,12 @@ void readDTCs() {
   Serial.println(count);
 }
 
-// ---- DTC clear (ASSUMPTION: KWP2000 service 0x14 ClearDiagnosticInformation) ----
+// ---- DTC clear (GUESS: KWP2000 service 0x14 ClearDiagnosticInformation) ----
 void clearDTCs() {
   Serial.println("STEP:DTC_CLEAR_START");
 
   uint8_t resp[8];
-  // 14 FF 00 - "clear all DTCs" (assumed format)
+  // 14 FF 00 - "clear all DTCs" (guessed format)
   send8(0x03, 0x14, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00);
   if (!waitResponse(resp, 1000)) {
     Serial.println("ERR:DTC_CLEAR_NO_RESP");
@@ -88,9 +88,9 @@ void clearDTCs() {
   Serial.println("STATUS:DTC_CLEARED");
 }
 
-// ---- Live Data (ASSUMPTION: KWP2000 service 0x21 ReadDataByLocalIdentifier) ----
-// Local identifiers (LIDs) are COMPLETELY ASSUMED - the real
-// values depend on the ECU software and must be identified from a CAN log.
+// ---- Live Data (GUESS: KWP2000 service 0x21 ReadDataByLocalIdentifier) ----
+// The local identifiers (LIDs) are COMPLETELY GUESSED - the real values
+// depend on the ECU software and have to be identified from a CAN log.
 #define LID_RPM  0x01
 #define LID_TEMP 0x02
 #define LID_MAP  0x03
@@ -100,7 +100,7 @@ bool readLiveValue(uint8_t lid, uint16_t* outValue) {
   send8(0x02, 0x21, lid, 0x00, 0x00, 0x00, 0x00, 0x00);
   if (!waitResponse(resp, 300)) return false;
   if (resp[0] == 0x7F) return false;
-  // We assume a 2-byte value is at position [2],[3] in the response
+  // Assume the response holds a 2-byte value at positions [2],[3]
   *outValue = (resp[2] << 8) | resp[3];
   return true;
 }

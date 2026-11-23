@@ -31,11 +31,12 @@ Bosch GmbH or any other trademark mentioned.
 - ✅ **Tested and working on one (1) M3C ECU only.** Other ECU variants,
   model years or software versions may behave differently. If you test it
   on another ECU, please open an issue and report the result.
-- ✅ **Checksum correction is available as a separate program**
-  ([`tools/m3c_checksum_gui.py`](tools/m3c_checksum_gui.py)). The flasher
-  itself still writes the file exactly as given, so if you modify a file
-  (e.g. in TunerPro), **run it through the checksum tool before writing**,
-  otherwise the ECU may not start. See [Checksum correction](#checksum-correction).
+- ✅ **Checksum correction is built into the flasher.** Before every write
+  the file's checksums are verified. If one is wrong, a corrected copy
+  (`<name>_CHK_OK.bin`) is created on the SD card, re-verified from scratch
+  and written instead of the original. A standalone checker/fixer is also
+  available ([`tools/m3c_checksum_gui.py`](tools/m3c_checksum_gui.py)).
+  See [Checksum correction](#checksum-correction).
 
 ## Hardware
 
@@ -79,6 +80,7 @@ Bosch GmbH or any other trademark mentioned.
 firmware/
   ktm_m3c_flasher.ino   - Main Arduino sketch (CAN protocol, Connect/Read/Write)
   blocks.h              - Calibration blocks written to the ECU during Connect
+  checksum.h            - Built-in CRC-16/MODBUS checksum check and correction
   diagnostics.h         - DTC/Live Data (BEST GUESS, unconfirmed - see warning in file)
   webui.h               - WiFi/phone web interface (Connect/Read/Write/SD files)
 gui/
@@ -115,7 +117,11 @@ read-back matches byte for byte.
 2. Either connect over USB and run `gui/ktm_m3c_flasher_gui.py`
    (`pip install pyserial`), or connect your phone to the WiFi network
    `M3C_Flasher` (password `flasher123`) and open `192.168.4.1` in a browser.
-3. Press CONNECT, then READ FLASH before attempting any write.
+3. The desktop GUI loads the SD card file list as soon as it starts - you can
+   upload, download and delete SD files without connecting to the ECU.
+4. Press CONNECT, then READ FLASH before attempting any write.
+5. **RESET ESP32** (desktop GUI and web page) restarts the ESP32 if anything
+   gets stuck. After a reset, press CONNECT again.
 
 ## Checksum correction
 
@@ -124,7 +130,14 @@ The M3C flash contains several checksum blocks. Each one starts with
 address ranges it covers. A 256 KB read has four of them; a tune normally
 only changes the calibration block at `0x6804`.
 
-`tools/m3c_checksum_gui.py` checks and fixes them. It uses only the Python
+**The flasher does this automatically before every write** (see Project
+status). The log shows each checksum block as OK or BAD, and the corrected
+file appears in the SD card list as `<name>_CHK_OK.bin`. The same file name
+is reused on every attempt, and a corrected copy that fails the self-check
+is deleted instead of being left on the card.
+
+To check or fix a file on your computer before uploading it,
+`tools/m3c_checksum_gui.py` does the same thing. It uses only the Python
 standard library (no `pip install` needed):
 
 1. Run `python tools/m3c_checksum_gui.py` (or double-click it on Windows).
@@ -155,7 +168,6 @@ Help is very welcome! You can contribute in several ways:
 
 Areas where help is especially needed:
 
-- Built-in checksum correction directly in the flasher (currently a separate program)
 - Support and testing on **other M3C variants / model years**
 - Confirming the **DTC / Live Data** commands with real CAN logs
 

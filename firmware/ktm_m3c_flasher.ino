@@ -2,6 +2,7 @@
 #include <SPI.h>
 #include <SD.h>
 #include "blocks.h"
+#include "checksum.h"
 
 #define CAN_TX 4
 #define CAN_RX 5
@@ -10,8 +11,8 @@
 #define SD_MISO 17
 #define SD_MOSI 16
 
-// Total size of the readable/writable flash - 4 pages x 256 addresses x 256 bytes.
-// Used to validate the file size before WRITEFULL starts.
+// Size of the full readable/writable flash - 4 pages x 256 addresses x 256 bytes.
+// Used to validate the WRITEFULL file size before writing.
 #define EXPECTED_BIN_SIZE 262144UL
 
 CanFrame rxFrame;
@@ -25,9 +26,9 @@ volatile bool webOpRunning = false;
 String webStatusText = "Ready";
 int webProgressPct = 0;
 
-// NOTE: these globals expose ECU info and results to the
-// WiFi/web UI as well, not just via Serial (Python GUI) - previously
-// this info only existed as Serial prints, the web UI couldn't see any of it.
+// CHANGE: these globals expose ECU info and results to the WiFi/web UI
+// as well, not just via Serial (Python GUI) - previously this info was
+// only printed to Serial, so the web UI couldn't see any of it.
 String g_vin = "";
 String g_cal = "";
 String g_date = "";
@@ -48,8 +49,8 @@ long addrToBinOffset(uint16_t addr) {
   return -1;
 }
 
-// NOTE: reduced from 50 to 3 - if sending a CAN frame keeps
-// failing, there's no point retrying 50 times; 3 is enough for a fast failure.
+// CHANGE: reduced from 50 to 3 - if sending a CAN frame repeatedly
+// fails, there's no point retrying 50 times; 3 is enough to fail fast.
 bool sendWithRetry(uint8_t* data, int retries = 3) {
   for (int i = 0; i < retries; i++) {
     CanFrame tx = {0};
@@ -238,14 +239,16 @@ bool eraseCheck(uint8_t page, uint8_t counter) {
 // =====================================================================
 // READING ECU IDENTIFICATION FIELDS (VIN/Cal/Date/Ver) - service 0x1A
 //
-// Reads the ISO-TP length (isoLen) DYNAMICALLY from the response's PCI byte,
-// instead of a hardcoded CF-frame count like before. This means it
-// works correctly even if a field is longer/shorter than on this
-// particular ECU software version (e.g. a different model year/VIN length).
+// Reads the ISO-TP length (isoLen) DYNAMICALLY from the response's PCI
+// byte, instead of a hardcoded number of CF frames as before. This
+// means it also works correctly if a field is longer/shorter than it
+// happens to be for this particular ECU firmware version (e.g. a
+// different model year / VIN length).
 //
-// The first 2 bytes of the response content are always the service response
-// code (0x5A) + an echo of the requested identifier (e.g. 0x90) - these are
-// excluded from the text, the rest is the actual content.
+// The first 2 bytes of the response content are always the service
+// response code (0x5A) + an echo of the requested identifier (e.g.
+// 0x90) - these are stripped out of the text, the rest is the actual
+// content.
 // =====================================================================
 
 bool readEcuIdRaw(uint8_t identifier, uint8_t* outBuf, int& outLen) {
@@ -278,7 +281,7 @@ bool readEcuIdRaw(uint8_t identifier, uint8_t* outBuf, int& outLen) {
 }
 
 // Decodes an ECU-ID response into ASCII text (for the VIN, Cal, Ver fields).
-// The first 2 bytes (service echo + identifier echo) are excluded.
+// The first 2 bytes (service echo + identifier echo) are stripped out.
 String decodeEcuIdText(uint8_t* buf, int len) {
   String out = "";
   for (int i = 2; i < len; i++) {
@@ -288,9 +291,9 @@ String decodeEcuIdText(uint8_t* buf, int len) {
   return out;
 }
 
-// Decodes the Date field (0x86) from BCD into a DD.MM.YY date.
-// The response is a Single Frame, 3 content bytes after 2 header bytes: DD, MM, YY,
-// each BCD-encoded (e.g. 0x19 = "19", not 25).
+// Decodes the Date field (0x86) from BCD into a DD.MM.YY date string.
+// The response is a Single Frame, 3 content bytes after 2 header bytes:
+// DD, MM, YY, each BCD-encoded (e.g. 0x19 = "19", not 25).
 String decodeEcuDate(uint8_t* buf, int len) {
   if (len < 5) return "??.??.??";
   auto bcd = [](uint8_t b) { return (int)((b >> 4) * 10 + (b & 0x0F)); };
@@ -383,8 +386,83 @@ bool connectECU() {
 }
 
 // =====================================================================
+// RE-AUTHENTICATION BEFORE READ
+//
+// DISCOVERED from write_read_log.csv (Flex: Write -> immediately Read,
+// WITHOUT a power cycle): once the ECU has just finished a Write, it
+// drops back into normal running mode (regular background traffic
+// 6B1/6B2/... starts up again on the bus), and Read no longer works
+// with just the plain "00 00 00 02" handshake ("no response"). Instead,
+// Flex performs an ALMOST full re-connect sequence:
+//
+//   1) "00 00 00 02" handshake
+//   2) "04 7D 4E 42 31" security-access request (SENT ONCE, unlike
+//      connectECU(), where it's sent twice with delays in between -
+//      that "double send" is apparently only needed for a cold start
+//      (a just-powered ECU), not for a warm ECU)
+//   3) poll "01 54" until the seed arrives ("05 A0 ..."), answer with
+//      the fixed key "05 65 5F B7 B7 70" - exactly the same
+//      waitSeedAndAnswer() logic as in connectECU()
+//   4) rewrite ALL 36 calibration blocks again (same data as in
+//      Connect - this appears to be part of the security protocol
+//      itself, not an actual calibration change)
+//   5) seed2 ("01 79" / "01 FF ...") and the same 3x "00 00 00 02"
+//      handshake timing as connectECU()
+//
+// Unlike connectECU(), this does NOT perform the "02 3E 01" session
+// request, the VIN/Cal/Date/Ver reads, or the "01 20" mode command -
+// these were completely skipped in the log; Flex went straight from
+// the handshake to security access.
+// =====================================================================
+
+bool reauthForRead(unsigned long seedTimeoutMs = 20000) {
+  uint8_t resp[8];
+
+  Serial.println("STEP:Reauth_Handshake");
+  send8(0x00, 0x00, 0x00, 0x02, 0, 0, 0, 0);
+  waitResponse(resp, 500);
+
+  Serial.println("STEP:Reauth_SecAccess");
+  send8(0x04, 0x7D, 0x4E, 0x42, 0x31, 0, 0, 0);
+  if (!waitResponse(resp, 500)) {
+    Serial.println("ERR:REAUTH_NO_SECACCESS_RESP");
+    return false;
+  }
+
+  Serial.println("STEP:Reauth_WaitSeed1");
+  if (!waitSeedAndAnswer(seedTimeoutMs)) {
+    Serial.println("ERR:REAUTH_NO_SEED1");
+    return false;
+  }
+
+  Serial.println("STEP:Reauth_WriteCalBlocks");
+  for (int i = 0; i < NUM_BLOCKS; i++) {
+    uint16_t addr = BLOCKS[i].addr;
+    uint8_t page = 0x78;
+    uint8_t group = (uint8_t)(addr >> 8);
+    int dataLen = (i == NUM_BLOCKS - 1) ? 51 : 65;
+    if (!writeBlock(page, group, BLOCKS[i].data, dataLen)) {
+      Serial.print("ERR:REAUTH_WB_FAIL:");
+      Serial.println(i);
+      return false;
+    }
+  }
+  Serial.println("STEP:Reauth_WriteCalBlocks_OK");
+
+  Serial.println("STEP:Reauth_WaitSeed2");
+  waitSeed2AndAnswer(10000);
+
+  delay(78); send8(0x00, 0x00, 0x00, 0x02, 0, 0, 0, 0); drainRX(50);
+  delay(77); send8(0x00, 0x00, 0x00, 0x02, 0, 0, 0, 0); drainRX(50);
+  delay(77); send8(0x00, 0x00, 0x00, 0x02, 0, 0, 0, 0); drainRX(50);
+
+  Serial.println("STEP:Reauth_Done");
+  return true;
+}
+
+// =====================================================================
 // Finds the next free filename to write to the SD card - NEVER
-// OVERWRITES AN EXISTING FILE. flash_dump.bin, flash_dump_2.bin,
+// overwrites an existing file. flash_dump.bin, flash_dump_2.bin,
 // flash_dump_3.bin, etc.
 // =====================================================================
 
@@ -402,18 +480,34 @@ String nextDumpFilename() {
 void readFlash(bool skipHandshake = false) {
   Serial.println("STATUS:READING");
 
-  uint8_t resp[8];
+  const uint16_t SECTS[][2] = {{0x7800, 0x79FF}, {0x7E00, 0x7FFF}};
+  int total = 0;
+  for (auto& s : SECTS) total += s[1] - s[0] + 1;
+
+  // CHANGE: the old simple "00 00 00 02" handshake has been replaced
+  // with reauthForRead() - this is ALWAYS needed, since the ECU may
+  // have dropped back into normal mode in the meantime (e.g.
+  // immediately after WRITEFULL, without a power cycle). See the
+  // reauthForRead() comment and the write_read_log.csv analysis: a
+  // plain handshake is no longer enough, the same security-access +
+  // calibration-block sequence that Flex uses is required. This is
+  // harmless even if the ECU was already unlocked - rewriting the
+  // blocks with the same data changes nothing.
   if (!skipHandshake) {
-    Serial.println("STEP:PreReadHandshake");
-    send8(0x00, 0x00, 0x00, 0x02, 0, 0, 0, 0);
-    waitResponse(resp, 500);
+    Serial.println("STEP:PreReadReauth");
+    if (!reauthForRead()) {
+      Serial.println("ERR:REAUTH_FAILED");
+      Serial.print("WARN:INCOMPLETE_READ:");
+      Serial.println(total);
+      webReadErrors = total;
+      Serial.print("STATUS:READ_DONE:0:ERR:");
+      Serial.println(total);
+      return;
+    }
   } else {
     Serial.println("STEP:PreReadHandshake_SKIPPED");
   }
 
-  const uint16_t SECTS[][2] = {{0x7800, 0x79FF}, {0x7E00, 0x7FFF}};
-  int total = 0;
-  for (auto& s : SECTS) total += s[1] - s[0] + 1;
   int done = 0, errors = 0;
 
   bool sdWriting = false;
@@ -430,7 +524,7 @@ void readFlash(bool skipHandshake = false) {
     }
   }
 
-  // Collect a list of failed addresses to summarize at the end -
+  // Collect the list of failed addresses to print a summary at the end -
   // keep at most 64 addresses in memory (printing more over Serial
   // wouldn't be useful, but ERR:count is always exact).
   uint16_t failedAddrs[64];
@@ -486,10 +580,11 @@ void readFlash(bool skipHandshake = false) {
       }
 
       if (received == 0) {
-        // NOTE: a failed address is now written to the SD card EXPLICITLY
-        // as 0xFF, instead of being skipped in the file. This way the file content
-        // is always deterministic and you don't have to guess what the SD card's
-        // filesystem leaves in unwritten spots by default.
+        // CHANGE: a failed address is written to SD EXPLICITLY as
+        // 0xFF, rather than being skipped in the file. This way the
+        // file content is always deterministic and you don't have to
+        // guess what the SD card's filesystem leaves by default in
+        // unwritten spots.
         Serial.print("ERR:NO_RESP:0x");
         Serial.println(addr, HEX);
         errors++;
@@ -542,10 +637,10 @@ void readFlash(bool skipHandshake = false) {
     Serial.println("STEP:SD_DUMP_DONE");
   }
 
-  // NOTE: a clear summary if anything failed - shows exactly
-  // which addresses have an 0xFF placeholder in the file instead of a real
-  // read result. If errors==0, the whole file is 100% confirmed to be
-  // actual ECU content.
+  // CHANGE: a clear summary if anything failed - shows exactly which
+  // addresses hold an 0xFF placeholder in the file rather than an
+  // actual read result. If errors==0, the whole file is 100%
+  // confirmed real ECU content.
   if (errors > 0) {
     Serial.print("WARN:INCOMPLETE_READ:");
     Serial.println(errors);
@@ -558,7 +653,7 @@ void readFlash(bool skipHandshake = false) {
     if (errors > failedCount) {
       Serial.print(",...(+");
       Serial.print(errors - failedCount);
-      Serial.print(" veel)");
+      Serial.print(" more)");
     }
     Serial.println();
   }
@@ -585,9 +680,9 @@ void readFileBlock(File& f, long offset, size_t fileSize, uint8_t* buf) {
 }
 
 // =====================================================================
-// FULL-FLASH WRITE HELPER FUNCTIONS — check ONLY the command-byte
-// echo (e.g. resp[0]==0x45), exactly like the commercial tool itself does.
-// The rest of the response content isn't checked and there's no retry logic here.
+// FULL-FLASH WRITE HELPER FUNCTIONS - check ONLY the command-byte echo
+// (e.g. resp[0]==0x45), exactly as Flex itself does. The rest of the
+// response content is not checked, and no retry logic is done here.
 // =====================================================================
 
 bool loadBuffer256(uint8_t* buf256) {
@@ -612,18 +707,50 @@ bool writeFullFlash(const char* filename) {
   if (!connected) { Serial.println("ERR:WRITEFULL_NOT_CONNECTED"); return false; }
   if (!sdReady) { Serial.println("ERR:WRITEFULL_SD_NOT_READY"); return false; }
 
-  File f = SD.open(filename, FILE_READ);
+  // First, quick size check - no point checking the checksum if the
+  // file isn't even the right length to begin with.
+  {
+    File sizeCheck = SD.open(filename, FILE_READ);
+    if (!sizeCheck) { Serial.println("ERR:WRITEFULL_FILE_NOT_FOUND"); return false; }
+    size_t sz = sizeCheck.size();
+    sizeCheck.close();
+    if (sz != EXPECTED_BIN_SIZE) {
+      Serial.print("ERR:WRITEFULL_BAD_FILESIZE:");
+      Serial.print(sz);
+      Serial.print(":EXPECTED:");
+      Serial.println(EXPECTED_BIN_SIZE);
+      return false;
+    }
+  }
+
+  // CHANGE: ALWAYS, before touching the ECU at all, we verify the
+  // file's internal CRC-16/MODBUS checksum (the same algorithm Flex
+  // uses - confirmed byte-identical against 5 real tests). If the
+  // checksum is wrong, the original is NEVER written to the ECU -
+  // instead a new, correctly-calculated copy is created on the SD
+  // card ("<name>_CHK_OK.bin") and that one is written instead. If the
+  // file's checksum is already fine, the original is used directly.
+  Serial.println("STEP:WriteFull_ChecksumVerify");
+  String useFilename;
+  int chkResult = verifyAndFixChecksum(filename, useFilename);
+  if (chkResult < 0) {
+    Serial.println("STATUS:WRITEFULL_FAILED");
+    return false;
+  }
+  if (chkResult == 1) {
+    Serial.print("STATUS:WRITEFULL_USING_FIXED_FILE:");
+    Serial.println(useFilename);
+  }
+
+  File f = SD.open(useFilename, FILE_READ);
   if (!f) { Serial.println("ERR:WRITEFULL_FILE_NOT_FOUND"); return false; }
 
   size_t fileSize = f.size();
   Serial.print("STEP:WriteFull_FileSize:");
   Serial.println(fileSize);
 
-  // NOTE: file size check before touching the ECU at all.
-  // If the file isn't exactly 256KB, something is definitely wrong (a broken
-  // upload, wrong file selected, etc.) - we refuse to write, since
-  // readFileBlock() would silently fill missing spots with 0xFF, which
-  // would silently blank out part of the ECU without any warning.
+  // For safety, check the size once more on the final (possibly
+  // corrected) file too - the copy must end up exactly the same size.
   if (fileSize != EXPECTED_BIN_SIZE) {
     Serial.print("ERR:WRITEFULL_BAD_FILESIZE:");
     Serial.print(fileSize);
@@ -890,10 +1017,24 @@ void handleUploadDone() {
   uploadFile.close();
   uploadActive = false;
 
-  // NOTE: right after upload, we check whether the file has the correct
-  // size - tells the user immediately, instead of only when they
-  // run WRITEFULL later.
+  // CHANGE: check right after upload whether the file has the correct
+  // size - lets the user know immediately, rather than only once they
+  // later run WRITEFULL.
   Serial.println("STATUS:UPLOAD_DONE");
+}
+
+// =====================================================================
+// ESP32 RESTART - closes any open SD files first so nothing is left
+// half-written, then restarts the chip. Used by the "RESET" serial
+// command and the web UI's /reset endpoint.
+// =====================================================================
+void doEspRestart() {
+  Serial.println("STATUS:RESETTING");
+  if (uploadActive) { uploadFile.close(); uploadActive = false; }
+  if (dumpFile) dumpFile.close();
+  Serial.flush();
+  delay(200);
+  ESP.restart();
 }
 
 #include "diagnostics.h"
@@ -913,11 +1054,12 @@ void handleSerialLine(String line) {
     readFlash();
     reading = false;
   }
-  // FOR EXPERIMENTATION: same as READ, but without the pre-read handshake. Use
-  // this to test whether, right after WRITEFULL finishes, an extra handshake
-  // itself disrupts the ECU's state (the opposite hypothesis to "more handshakes
-  // are needed"). The result of either version (whether "ERR:NO_RESP" goes away or
-  // not) gives real information without needing a CAN log.
+  // FOR TESTING: same as READ, but without the pre-handshake. Use this
+  // to test whether, right after a WRITEFULL finishes, the extra
+  // handshake itself interferes with the ECU's state (the opposite
+  // hypothesis to needing more handshakes). The result of either
+  // version (whether "ERR:NO_RESP" goes away or not) gives real
+  // information without needing a CAN log.
   else if (line == "READ_NOHS") {
     if (!connected) { Serial.println("ERR:NOT_CONNECTED"); return; }
     reading = true;
@@ -987,6 +1129,13 @@ void handleSerialLine(String line) {
   }
   else if (line == "LIVE_READ") {
     readLiveData();
+  }
+  // Software restart of the ESP32 (same as pressing the EN/RST button).
+  // The desktop GUI's Reset button normally resets the board through the
+  // USB-serial RTS line instead, which works even if the firmware is stuck
+  // in a long operation - this command is the fallback for that.
+  else if (line == "RESET") {
+    doEspRestart();
   }
   else if (line == "PING") Serial.println("PONG");
   else if (line == "STATUS") Serial.println(connected ? "STATUS:CONNECTED" : "STATUS:DISCONNECTED");

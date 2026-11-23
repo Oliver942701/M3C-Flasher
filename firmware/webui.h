@@ -10,7 +10,7 @@ const char* AP_PASS = "flasher123";
 WebServer webServer(80);
 
 // =====================================================================
-// WEB PAGE - single-page app that mirrors the desktop Python GUI's
+// WEB PAGE - a single-page app that mirrors the desktop Python GUI's
 // functionality: Connect, Read, Write (WRITEFULL), SD file management,
 // ECU info (VIN/Cal/Date/Ver), Diagnostics.
 // =====================================================================
@@ -21,7 +21,7 @@ const char WEB_PAGE[] PROGMEM = R"HTML(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>KTM Husqvarna GasGas M3C Flasher</title>
+<title>KTM M3C Flasher</title>
 <style>
   * { box-sizing: border-box; }
   body { background:#1e1e1e; color:#d4d4d4; font-family:Consolas,monospace;
@@ -38,6 +38,7 @@ const char WEB_PAGE[] PROGMEM = R"HTML(
   .sd { background:#3c3c3c; font-size:13px; padding:9px; }
   .diag { background:#6b3fa0; }
   .upload { background:#0078d4; }
+  .reset { background:#8a6d00; font-size:13px; padding:9px; margin-top:18px; }
   #status { background:#0d0d0d; border:1px solid #3c3c3c; border-radius:6px;
             padding:10px; margin-top:8px; min-height:20px; font-size:13px; }
   #progressWrap { background:#2d2d2d; border-radius:6px; height:18px;
@@ -63,15 +64,15 @@ const char WEB_PAGE[] PROGMEM = R"HTML(
 </style>
 </head>
 <body>
-<h2>KTM Husqvarna GasGas M3C Flasher</h2>
+<h2>KTM M3C Flasher</h2>
 
 <button id="btnConnect" class="btn connect" onclick="doConnect()">CONNECT</button>
 
 <div class="infogrid">
   <div class="infocell"><div class="lbl">VIN</div><div class="val" id="vinVal">---</div></div>
-  <div class="infocell"><div class="lbl">Kalibratsioon</div><div class="val" id="calVal">---</div></div>
+  <div class="infocell"><div class="lbl">Calibration</div><div class="val" id="calVal">---</div></div>
   <div class="infocell"><div class="lbl">Date</div><div class="val" id="dateVal">---</div></div>
-  <div class="infocell"><div class="lbl">Tarkvara</div><div class="val" id="verVal">---</div></div>
+  <div class="infocell"><div class="lbl">Software</div><div class="val" id="verVal">---</div></div>
 </div>
 
 <div id="progressWrap"><div id="progressBar"></div></div>
@@ -89,11 +90,11 @@ const char WEB_PAGE[] PROGMEM = R"HTML(
 <button id="btnWrite" class="btn write" onclick="doWrite()" disabled>WRITE TO ECU (selected file)</button>
 
 <details>
-  <summary>Diagnostika (oletuslik, kinnitamata)</summary>
-  <div class="warn">These commands are not yet confirmed from a CAN log - may not work.</div>
+  <summary>Diagnostics (speculative, unconfirmed)</summary>
+  <div class="warn">These commands have not yet been confirmed from a CAN log - may not work.</div>
   <div class="row2">
-    <button class="btn diag" onclick="dtcRead()">Read fault codes</button>
-    <button class="btn diag" style="background:#c84b2f" onclick="dtcClear()">Clear fault codes</button>
+    <button class="btn diag" onclick="dtcRead()">Read trouble codes</button>
+    <button class="btn diag" style="background:#c84b2f" onclick="dtcClear()">Clear trouble codes</button>
   </div>
   <ul id="dtclist"></ul>
   <button id="btnLive" class="btn diag" onclick="toggleLive()">Start Live Data</button>
@@ -103,6 +104,8 @@ const char WEB_PAGE[] PROGMEM = R"HTML(
     <div class="infocell"><div class="lbl">MAP</div><div class="liveval" id="liveMap">---</div></div>
   </div>
 </details>
+
+<button id="btnReset" class="btn reset" onclick="doReset()">RESET ESP32</button>
 
 <script>
 let sdFiles = [];
@@ -114,9 +117,10 @@ let liveOn = false;
 function setBusy(busy) {
   document.getElementById('btnConnect').disabled = busy || connected;
   document.getElementById('btnRead').disabled = busy || !connected;
-  // NOTE: reading/deleting/uploading on the SD card doesn't need an ECU
-  // connection, only the SD card's own presence (sdReady). Only actually
-  // writing to the ECU (btnWrite) requires connected=true.
+  // CHANGE: reading/deleting/uploading SD card files does not require
+  // an ECU connection, only the SD card itself to be present
+  // (sdReady). Only writing to the real ECU (btnWrite) requires
+  // connected=true.
   document.getElementById('btnRefresh').disabled = busy || !sdReady;
   document.getElementById('btnDelete').disabled = busy || !sdReady || !selectedFile;
   document.getElementById('btnWrite').disabled = busy || !connected || !selectedFile;
@@ -135,11 +139,29 @@ function doRead() {
 
 function doWrite() {
   if (!selectedFile) { alert('Select a file from the list!'); return; }
-  if (!confirm('Write the contents of "' + selectedFile + '" to the entire ECU flash?\n\n' +
+  if (!confirm('Write the contents of "' + selectedFile + '" into the entire ECU flash?\n\n' +
                'This is a 2306-step process and takes several minutes.\n\n' +
-               'THIS PERMANENTLY MODIFIES THE ECU! Continue?')) return;
+               'THIS PERMANENTLY CHANGES THE ECU! Continue?')) return;
   document.getElementById('status').innerText = 'Writing ' + selectedFile + '...';
   fetch('/writefull?name=' + encodeURIComponent(selectedFile)).then(() => poll());
+}
+
+function doReset() {
+  if (!confirm('Restart the ESP32?\n\nAny operation in progress will be stopped and the ECU ' +
+               'connection is lost - you will need to press CONNECT again.\n\n' +
+               'Do NOT reset while writing to the ECU unless the write is already stuck.')) return;
+  document.getElementById('status').innerText = 'Restarting ESP32... reconnect to the WiFi if the page does not come back.';
+  connected = false;
+  sdFiles = [];
+  selectedFile = null;
+  renderSD();
+  setBusy(true);
+  fetch('/reset').catch(() => {});
+  // The ESP32 needs a few seconds to boot and start the WiFi AP again
+  setTimeout(function retry() {
+    fetch('/status').then(() => { location.reload(); })
+                    .catch(() => setTimeout(retry, 2000));
+  }, 5000);
 }
 
 function poll() {
@@ -162,15 +184,16 @@ function poll() {
 }
 
 function renderSD() {
-  // NOTE: download link removed - file management (adding/removing files
-  // on the SD card) is now done only via computer, the phone can only
-  // SELECT which already-existing file to write.
+  // CHANGE: the download link has been removed - file management
+  // (adding/removing files on the SD card) now happens only through
+  // the computer; the phone can only SELECT which existing file to
+  // write.
   let ul = document.getElementById('sdlist');
   ul.innerHTML = '';
   sdFiles.forEach(f => {
     let li = document.createElement('li');
     li.className = (f.name === selectedFile) ? 'selected' : '';
-    li.innerHTML = f.name + '<br><span class="sz">' + f.size + ' baiti</span>';
+    li.innerHTML = f.name + '<br><span class="sz">' + f.size + ' bytes</span>';
     li.onclick = () => { selectedFile = f.name; renderSD(); setBusy(false); };
     ul.appendChild(li);
   });
@@ -195,7 +218,7 @@ function deleteSelected() {
 
 function dtcRead() {
   let ul = document.getElementById('dtclist');
-  ul.innerHTML = '<li>Loading...</li>';
+  ul.innerHTML = '<li>Reading...</li>';
   fetch('/dtcread').then(r => r.json()).then(codes => {
     ul.innerHTML = '';
     codes.forEach(c => {
@@ -203,12 +226,12 @@ function dtcRead() {
       li.innerText = c;
       ul.appendChild(li);
     });
-    if (codes.length === 0) ul.innerHTML = '<li>No fault codes found</li>';
+    if (codes.length === 0) ul.innerHTML = '<li>No trouble codes found</li>';
   });
 }
 
 function dtcClear() {
-  if (!confirm('Clear all fault codes?')) return;
+  if (!confirm('Clear all trouble codes?')) return;
   fetch('/dtcclear').then(() => {
     document.getElementById('dtclist').innerHTML = '<li>Cleared</li>';
   });
@@ -239,7 +262,7 @@ poll();
 
 // =====================================================================
 // BACKGROUND TASKS - Connect/Read/Write run in their own FreeRTOS
-// task, so the HTTP server doesn't block while they run.
+// task, so the HTTP server doesn't block at the same time.
 // =====================================================================
 
 void webTaskFn(void* param) {
@@ -265,9 +288,9 @@ void webTaskFn(void* param) {
       readFlash();
       reading = false;
       if (webReadErrors == 0) {
-        webStatusText = "\u2705 Read complete - 0 errors, entire file confirmed";
+        webStatusText = "✅ Read complete - 0 errors, entire file confirmed";
       } else {
-        webStatusText = "\u26a0 Read complete - " + String(webReadErrors) + " error(s)";
+        webStatusText = "⚠ Read complete - " + String(webReadErrors) + " errors";
       }
       webProgressPct = 100;
     }
@@ -280,7 +303,7 @@ void webTaskFn(void* param) {
       webStatusText = "Writing " + fname + "...";
       webProgressPct = 0;
       bool ok = writeFullFlash(fname.c_str());
-      webStatusText = ok ? "\u2705 Write complete!" : "\u274c Write failed";
+      webStatusText = ok ? "✅ Write complete!" : "❌ Write failed";
     }
   }
 
@@ -418,6 +441,14 @@ void handleLiveRead() {
   webServer.send(200, "application/json", json);
 }
 
+// Restarts the ESP32. The response is sent first so the browser gets an
+// answer before the WiFi access point goes down.
+void handleReset() {
+  webServer.send(200, "text/plain", "RESETTING");
+  delay(300);
+  doEspRestart();
+}
+
 void setupWebUI() {
   WiFi.softAP(AP_SSID, AP_PASS);
   Serial.print("STATUS:WIFI_AP_IP:");
@@ -433,6 +464,7 @@ void setupWebUI() {
   webServer.on("/dtcread", handleDTCRead);
   webServer.on("/dtcclear", handleDTCClear);
   webServer.on("/liveread", handleLiveRead);
+  webServer.on("/reset", handleReset);
   webServer.begin();
   Serial.println("STATUS:WEBSERVER_STARTED");
 }
