@@ -20,6 +20,9 @@
 // the ECU if its checksum is wrong.
 // =====================================================================
 
+// Defined in ktm_m3c_flasher.ino - shown on the phone/web page.
+extern String webFailReason;
+
 #define M3C_PAGE 0x4000UL
 #define MAX_CHK_RECORDS 8
 #define MAX_RANGES_PER_RECORD 16
@@ -236,14 +239,15 @@ static bool chk_copyWithPatches(const char* srcName, const char* dstName,
 // =====================================================================
 int verifyAndFixChecksum(const char* srcName, String& outName) {
   File f = SD.open(srcName, FILE_READ);
-  if (!f) { Serial.println("ERR:WRITEFULL_CHECKSUM_OPEN_FAIL"); return -1; }
+  if (!f) { Out.println("ERR:WRITEFULL_CHECKSUM_OPEN_FAIL"); webFailReason = "could not open the file"; return -1; }
   long fullSize = f.size();
 
   static ChkRecord recs[MAX_CHK_RECORDS];
   int n = chk_findRecords(f, fullSize, recs, MAX_CHK_RECORDS);
   if (n == 0) {
     f.close();
-    Serial.println("ERR:WRITEFULL_NO_CHECKSUM_RECORDS");
+    Out.println("ERR:WRITEFULL_NO_CHECKSUM_RECORDS");
+    webFailReason = "no M3C checksum found - not a valid M3C file";
     return -1;
   }
 
@@ -255,25 +259,25 @@ int verifyAndFixChecksum(const char* srcName, String& outName) {
     f.read(sb, 2);
     stored[k] = ((uint16_t)sb[0] << 8) | sb[1];
     computed[k] = chk_crc16Ranges(f, recs[k]);
-    Serial.print("STEP:Checksum:0x");
-    Serial.print(recs[k].offset, HEX);
-    Serial.print(":stored=0x");
-    Serial.print(stored[k], HEX);
-    Serial.print(":computed=0x");
-    Serial.print(computed[k], HEX);
-    Serial.println(stored[k] == computed[k] ? ":OK" : ":BAD");
+    Out.print("STEP:Checksum:0x");
+    Out.print(recs[k].offset, HEX);
+    Out.print(":stored=0x");
+    Out.print(stored[k], HEX);
+    Out.print(":computed=0x");
+    Out.print(computed[k], HEX);
+    Out.println(stored[k] == computed[k] ? ":OK" : ":BAD");
     if (stored[k] != computed[k]) anyBad = true;
     yield();
   }
   f.close();
 
   if (!anyBad) {
-    Serial.println("STEP:WriteFull_ChecksumAllOK");
+    Out.println("STEP:WriteFull_ChecksumAllOK");
     outName = String(srcName);
     return 0;
   }
 
-  Serial.println("STEP:WriteFull_ChecksumBad_Recalculating");
+  Out.println("STEP:WriteFull_ChecksumBad_Recalculating");
 
   long patchOffsets[MAX_CHK_RECORDS];
   uint16_t patchValues[MAX_CHK_RECORDS];
@@ -290,7 +294,8 @@ int verifyAndFixChecksum(const char* srcName, String& outName) {
   if (!chk_copyWithPatches(srcName, CHK_TMP_NAME, patchOffsets, patchValues,
                            patchCount, fullSize)) {
     SD.remove(CHK_TMP_NAME);
-    Serial.println("ERR:WRITEFULL_CHECKSUM_COPY_FAIL");
+    Out.println("ERR:WRITEFULL_CHECKSUM_COPY_FAIL");
+    webFailReason = "could not create the corrected file on the SD card";
     return -1;
   }
 
@@ -299,7 +304,8 @@ int verifyAndFixChecksum(const char* srcName, String& outName) {
   File ff = SD.open(CHK_TMP_NAME, FILE_READ);
   if (!ff) {
     SD.remove(CHK_TMP_NAME);
-    Serial.println("ERR:WRITEFULL_CHECKSUM_REOPEN_FAIL");
+    Out.println("ERR:WRITEFULL_CHECKSUM_REOPEN_FAIL");
+    webFailReason = "could not read back the corrected file";
     return -1;
   }
   long fixedSize = ff.size();
@@ -320,8 +326,9 @@ int verifyAndFixChecksum(const char* srcName, String& outName) {
   if (!allGood) {
     // Never leave a broken corrected file on the SD card
     SD.remove(CHK_TMP_NAME);
-    Serial.print("ERR:WRITEFULL_CHECKSUM_SELFCHECK_FAIL:SIZE:");
-    Serial.println(fixedSize);
+    webFailReason = "corrected file failed the checksum self-check";
+    Out.print("ERR:WRITEFULL_CHECKSUM_SELFCHECK_FAIL:SIZE:");
+    Out.println(fixedSize);
     return -1;
   }
 
@@ -330,12 +337,13 @@ int verifyAndFixChecksum(const char* srcName, String& outName) {
   if (SD.exists(fixedName)) SD.remove(fixedName);
   if (!SD.rename(CHK_TMP_NAME, fixedName)) {
     SD.remove(CHK_TMP_NAME);
-    Serial.println("ERR:WRITEFULL_CHECKSUM_RENAME_FAIL");
+    Out.println("ERR:WRITEFULL_CHECKSUM_RENAME_FAIL");
+    webFailReason = "could not save the corrected file";
     return -1;
   }
 
-  Serial.print("STEP:WriteFull_ChecksumFixed:");
-  Serial.println(fixedName);
+  Out.print("STEP:WriteFull_ChecksumFixed:");
+  Out.println(fixedName);
   outName = fixedName;
   return 1;
 }

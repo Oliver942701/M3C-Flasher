@@ -45,7 +45,11 @@ Bosch GmbH or any other trademark mentioned.
   lines (500 kbit/s)
 - SD card module (SPI)
 - 12 V power supply for the ECU (battery or bench PSU)
-- (optional) WiFi for the phone/web interface
+- (optional) an Android phone for the Bluetooth app, or any phone/browser
+  for the WiFi web interface
+
+> Bluetooth needs an ESP32 with BLE (ESP32, ESP32-S3, ESP32-C3...). The
+> ESP32-S2 has no Bluetooth - use the WiFi web interface or USB there.
 
 ## Wiring
 
@@ -81,12 +85,14 @@ firmware/
   ktm_m3c_flasher.ino   - Main Arduino sketch (CAN protocol, Connect/Read/Write)
   blocks.h              - Calibration blocks written to the ECU during Connect
   checksum.h            - Built-in CRC-16/MODBUS checksum check and correction
+  ble_link.h            - Bluetooth LE link (Nordic UART Service) for the Android app
   diagnostics.h         - DTC/Live Data (BEST GUESS, unconfirmed - see warning in file)
   webui.h               - WiFi/phone web interface (Connect/Read/Write/SD files)
 gui/
   ktm_m3c_flasher_gui.py - Desktop Python/Tkinter GUI (over USB Serial)
 tools/
   m3c_checksum_gui.py    - Standalone checksum checker/fixer (Python/Tkinter)
+android/                 - Android app (Kotlin/Jetpack Compose, Bluetooth LE)
 ```
 
 ## Protocol summary
@@ -112,16 +118,48 @@ read-back matches byte for byte.
 
 ## Usage
 
-1. Open the `firmware/` folder in the Arduino IDE, select the ESP32-S3 board
-   and upload.
-2. Either connect over USB and run `gui/ktm_m3c_flasher_gui.py`
-   (`pip install pyserial`), or connect your phone to the WiFi network
-   `M3C_Flasher` (password `flasher123`) and open `192.168.4.1` in a browser.
+1. Open the `firmware/` folder in the Arduino IDE, select the ESP32-S3 board,
+   set **Tools → Partition Scheme → Huge APP (3MB No OTA/1MB SPIFFS)**
+   (WiFi + Bluetooth do not fit into the default partition) and upload.
+2. Use one of the three interfaces - they all talk to the same firmware:
+   - **Desktop:** connect over USB and run `gui/ktm_m3c_flasher_gui.py`
+     (`pip install pyserial`).
+   - **Android app:** see [Android app](#android-app) below.
+   - **Web:** connect your phone to the WiFi network `M3C_Flasher`
+     (password `flasher123`) and open `192.168.4.1` in a browser.
 3. The desktop GUI loads the SD card file list as soon as it starts - you can
    upload, download and delete SD files without connecting to the ECU.
 4. Press CONNECT, then READ FLASH before attempting any write.
 5. **RESET ESP32** (desktop GUI and web page) restarts the ESP32 if anything
    gets stuck. After a reset, press CONNECT again.
+
+## Android app
+
+The `android/` folder contains a native Android app (Android 8.0+) that
+connects to the ESP32 over **Bluetooth LE**. The ESP32 advertises as
+`M3C_Flasher` using the Nordic UART Service, and the app uses the same text
+protocol as the desktop GUI.
+
+Features: ECU CONNECT (VIN, calibration, date, version), READ FLASH to the SD
+card, SD card file list, upload from / save to the phone, delete,
+**WRITE TO ECU** with status and progress bar (checksum check → erase →
+write), ESP32 reset and the wiring diagram.
+
+If Bluetooth drops during a write, the ESP32 finishes the write on its own -
+do not switch off the ignition; reconnect after a few minutes.
+
+**Building and installing** (no prebuilt APK yet):
+
+1. Install [Android Studio](https://developer.android.com/studio) and open
+   the `android/` folder.
+2. On the phone enable **Developer options** (tap *Build number* 7 times) and
+   **USB debugging**, then connect it with a USB cable.
+   (Samsung: also turn off *Settings → Security and privacy → Auto Blocker*.)
+3. Select the phone at the top of Android Studio and press **Run ▶**.
+
+You can also test the Bluetooth link without the app, using any BLE UART
+terminal (e.g. nRF Connect): send `PING` followed by a newline and the ESP32
+answers `PONG`.
 
 ## Checksum correction
 

@@ -2,6 +2,7 @@
 #include <SPI.h>
 #include <SD.h>
 #include "blocks.h"
+#include "ble_link.h"   // must come before anything that prints (defines Out)
 #include "checksum.h"
 
 #define CAN_TX 4
@@ -25,6 +26,11 @@ bool sdReady = false;
 volatile bool webOpRunning = false;
 String webStatusText = "Ready";
 int webProgressPct = 0;
+// Short, human-readable reason for the last failed write - shown on the
+// phone/web page. Set together with each ERR:WRITEFULL_... Serial message.
+String webFailReason = "";
+// Name of the corrected "_CHK_OK" file if the last write used one, else "".
+String webFixedFile = "";
 
 // CHANGE: these globals expose ECU info and results to the WiFi/web UI
 // as well, not just via Serial (Python GUI) - previously this info was
@@ -34,6 +40,16 @@ String g_cal = "";
 String g_date = "";
 String g_ver = "";
 int webReadErrors = 0;
+int webReadDone = 0;
+
+// FIX: tracks whether the ECU has left the unlocked (connected) state.
+//  - false right after a successful CONNECT: the ECU is already unlocked,
+//    and it does NOT answer a new security-access request in this state -
+//    so a re-authentication here failed with REAUTH_NO_SECACCESS_RESP.
+//  - true once a WRITEFULL has started: after a write the ECU drops back
+//    into normal running mode, and only the full re-authentication
+//    (reauthForRead) brings it back for reading.
+bool ecuNeedsReauth = false;
 bool webWriteOk = false;
 
 File dumpFile;
@@ -60,20 +76,20 @@ bool sendWithRetry(uint8_t* data, int retries = 3) {
     memcpy(tx.data, data, 8);
     if (ESP32Can.writeFrame(tx)) {
       if (!reading && !writingFull) {
-        Serial.print("TX:");
+        Out.print("TX:");
         for (int j = 0; j < 8; j++) {
-          if (data[j] < 0x10) Serial.print("0");
-          Serial.print(data[j], HEX);
-          Serial.print(" ");
+          if (data[j] < 0x10) Out.print("0");
+          Out.print(data[j], HEX);
+          Out.print(" ");
         }
-        Serial.println();
+        Out.println();
       }
       return true;
     }
     while (ESP32Can.readFrame(rxFrame, 1)) { yield(); }
     delay(1);
   }
-  Serial.println("TX_FAIL");
+  Out.println("TX_FAIL");
   return false;
 }
 
@@ -90,13 +106,13 @@ bool waitResponse(uint8_t* resp, int timeoutMs = 1000) {
       if (rxFrame.identifier != 0x7E8) { yield(); continue; }
       memcpy(resp, rxFrame.data, 8);
       if (!reading && !writingFull) {
-        Serial.print("RX:");
+        Out.print("RX:");
         for (int i = 0; i < 8; i++) {
-          if (rxFrame.data[i] < 0x10) Serial.print("0");
-          Serial.print(rxFrame.data[i], HEX);
-          Serial.print(" ");
+          if (rxFrame.data[i] < 0x10) Out.print("0");
+          Out.print(rxFrame.data[i], HEX);
+          Out.print(" ");
         }
-        Serial.println();
+        Out.println();
       }
       return true;
     }
@@ -142,15 +158,15 @@ bool waitSeedAndAnswer(unsigned long timeoutMs) {
   while (millis() - start < timeoutMs) {
     if (ESP32Can.readFrame(rxFrame, 5)) {
       if (rxFrame.identifier == 0x7E8) {
-        Serial.print("RX:");
+        Out.print("RX:");
         for (int i = 0; i < 8; i++) {
-          if (rxFrame.data[i] < 0x10) Serial.print("0");
-          Serial.print(rxFrame.data[i], HEX);
-          Serial.print(" ");
+          if (rxFrame.data[i] < 0x10) Out.print("0");
+          Out.print(rxFrame.data[i], HEX);
+          Out.print(" ");
         }
-        Serial.println();
+        Out.println();
         if (rxFrame.data[0] == 0x05 && rxFrame.data[1] == 0xA0) {
-          Serial.println("STEP:GotSeed");
+          Out.println("STEP:GotSeed");
           delay(10);
           send8(0x05, 0x65, 0x5F, 0xB7, 0xB7, 0x70, 0x00, 0x00);
           uint8_t resp[8];
@@ -175,21 +191,21 @@ bool waitSeed2AndAnswer(unsigned long timeoutMs) {
     send8(0x01, 0x79, 0, 0, 0, 0, 0, 0);
     if (waitResponse(resp, 300)) {
       if (resp[0] == 0x01 && resp[1] == 0xFF) {
-        Serial.println("STEP:GotSeed2");
+        Out.println("STEP:GotSeed2");
         send8(0x01, 0xFF, 0x5F, 0xB7, 0xB7, 0x70, 0, 0);
         waitResponse(resp, 300);
         return true;
       } else {
-        Serial.print("STEP:Seed2Wait:0x");
-        Serial.println(resp[1], HEX);
+        Out.print("STEP:Seed2Wait:0x");
+        Out.println(resp[1], HEX);
       }
     } else {
-      Serial.println("STEP:Seed2NoResp");
+      Out.println("STEP:Seed2NoResp");
     }
     delay(100);
     yield();
   }
-  Serial.println("ERR:NO_SEED2");
+  Out.println("ERR:NO_SEED2");
   return false;
 }
 
@@ -209,8 +225,8 @@ bool writeBlock(uint8_t page, uint8_t group, const uint8_t* data, int dataLen) {
     d0, d1
   };
   sendWithRetry(hdr);
-  if (!waitResponse(resp, 500)) { Serial.println("ERR:WR_NO_FC"); return false; }
-  if (resp[0] != 0x30) { Serial.println("ERR:WR_BAD_FC"); return false; }
+  if (!waitResponse(resp, 500)) { Out.println("ERR:WR_NO_FC"); return false; }
+  if (resp[0] != 0x30) { Out.println("ERR:WR_BAD_FC"); return false; }
 
   int idx = 2, remaining = dataLen - 2, frame = 0;
   while (remaining > 0) {
@@ -224,8 +240,8 @@ bool writeBlock(uint8_t page, uint8_t group, const uint8_t* data, int dataLen) {
     sendWithRetry(fdata);
     frame++;
   }
-  if (!waitResponse(resp, 500)) { Serial.println("ERR:WR_NO_ACK"); return false; }
-  if (resp[1] != 0xA0) { Serial.println("ERR:WR_BAD_ACK"); return false; }
+  if (!waitResponse(resp, 500)) { Out.println("ERR:WR_NO_ACK"); return false; }
+  if (resp[1] != 0xA0) { Out.println("ERR:WR_BAD_ACK"); return false; }
   return true;
 }
 
@@ -304,48 +320,48 @@ String decodeEcuDate(uint8_t* buf, int len) {
 
 bool connectECU() {
   uint8_t resp[8];
-  Serial.println("STATUS:CONNECTING");
+  Out.println("STATUS:CONNECTING");
   g_vin = ""; g_cal = ""; g_date = ""; g_ver = "";
 
-  Serial.println("STEP:Session");
+  Out.println("STEP:Session");
   send8(0x02, 0x3E, 0x01, 0, 0, 0, 0, 0);
-  if (!waitResponse(resp, 500) || resp[1] != 0x7E) { Serial.println("ERR:NO_RESP_SESSION"); return false; }
+  if (!waitResponse(resp, 500) || resp[1] != 0x7E) { Out.println("ERR:NO_RESP_SESSION"); return false; }
 
   uint8_t idBuf[64];
   int idLen;
 
-  Serial.println("STEP:VIN");
-  if (!readEcuIdRaw(0x90, idBuf, idLen)) { Serial.println("ERR:NO_RESP_VIN"); return false; }
+  Out.println("STEP:VIN");
+  if (!readEcuIdRaw(0x90, idBuf, idLen)) { Out.println("ERR:NO_RESP_VIN"); return false; }
   g_vin = decodeEcuIdText(idBuf, idLen);
-  Serial.print("INFO:VIN:");
-  Serial.println(g_vin);
+  Out.print("INFO:VIN:");
+  Out.println(g_vin);
 
-  Serial.println("STEP:Cal");
-  if (!readEcuIdRaw(0x93, idBuf, idLen)) { Serial.println("ERR:NO_RESP_CAL"); return false; }
+  Out.println("STEP:Cal");
+  if (!readEcuIdRaw(0x93, idBuf, idLen)) { Out.println("ERR:NO_RESP_CAL"); return false; }
   g_cal = decodeEcuIdText(idBuf, idLen);
-  Serial.print("INFO:CAL:");
-  Serial.println(g_cal);
+  Out.print("INFO:CAL:");
+  Out.println(g_cal);
 
-  Serial.println("STEP:Date");
+  Out.println("STEP:Date");
   if (readEcuIdRaw(0x86, idBuf, idLen)) {
     g_date = decodeEcuDate(idBuf, idLen);
-    Serial.print("INFO:DATE:");
-    Serial.println(g_date);
+    Out.print("INFO:DATE:");
+    Out.println(g_date);
   }
 
-  Serial.println("STEP:Ver");
-  if (!readEcuIdRaw(0x95, idBuf, idLen)) { Serial.println("ERR:NO_RESP_VER"); return false; }
+  Out.println("STEP:Ver");
+  if (!readEcuIdRaw(0x95, idBuf, idLen)) { Out.println("ERR:NO_RESP_VER"); return false; }
   g_ver = decodeEcuIdText(idBuf, idLen);
-  Serial.print("INFO:VER:");
-  Serial.println(g_ver);
+  Out.print("INFO:VER:");
+  Out.println(g_ver);
 
-  Serial.println("STEP:Mode");
+  Out.println("STEP:Mode");
   send8(0x01, 0x20, 0, 0, 0, 0, 0, 0);
-  if (!waitResponse(resp, 500) || resp[1] != 0x60) { Serial.println("ERR:BAD_MODE"); return false; }
+  if (!waitResponse(resp, 500) || resp[1] != 0x60) { Out.println("ERR:BAD_MODE"); return false; }
 
-  Serial.println("STEP:SecAccess");
+  Out.println("STEP:SecAccess");
   send8(0x04, 0x7D, 0x4E, 0x42, 0x31, 0, 0, 0);
-  if (!waitResponse(resp, 500) || resp[1] != 0xA0) { Serial.println("ERR:KEY_REJECTED"); return false; }
+  if (!waitResponse(resp, 500) || resp[1] != 0xA0) { Out.println("ERR:KEY_REJECTED"); return false; }
 
   delay(300);
   send8(0x00, 0x00, 0x00, 0x02, 0, 0, 0, 0);
@@ -354,34 +370,35 @@ bool connectECU() {
   send8(0x04, 0x7D, 0x4E, 0x42, 0x31, 0, 0, 0);
   waitResponse(resp, 500);
 
-  Serial.println("STEP:WaitSeed1");
-  if (!waitSeedAndAnswer(15000)) { Serial.println("ERR:NO_SEED1"); return false; }
+  Out.println("STEP:WaitSeed1");
+  if (!waitSeedAndAnswer(15000)) { Out.println("ERR:NO_SEED1"); return false; }
 
-  Serial.println("STEP:WriteCalBlocks");
+  Out.println("STEP:WriteCalBlocks");
   for (int i = 0; i < NUM_BLOCKS; i++) {
-    Serial.print("STEP:WB_");
-    Serial.println(i);
+    Out.print("STEP:WB_");
+    Out.println(i);
     uint16_t addr = BLOCKS[i].addr;
     uint8_t page = 0x78;
     uint8_t group = (uint8_t)(addr >> 8);
     int dataLen = (i == NUM_BLOCKS - 1) ? 51 : 65;
 
     if (!writeBlock(page, group, BLOCKS[i].data, dataLen)) {
-      Serial.print("ERR:WB_FAIL:");
-      Serial.println(i);
+      Out.print("ERR:WB_FAIL:");
+      Out.println(i);
       return false;
     }
   }
-  Serial.println("STEP:WriteCalBlocks_OK");
+  Out.println("STEP:WriteCalBlocks_OK");
 
-  Serial.println("STEP:WaitSeed2");
+  Out.println("STEP:WaitSeed2");
   waitSeed2AndAnswer(10000);
 
   delay(78); send8(0x00, 0x00, 0x00, 0x02, 0, 0, 0, 0); drainRX(50);
   delay(77); send8(0x00, 0x00, 0x00, 0x02, 0, 0, 0, 0); drainRX(50);
   delay(77); send8(0x00, 0x00, 0x00, 0x02, 0, 0, 0, 0); drainRX(50);
 
-  Serial.println("STATUS:CONNECTED");
+  ecuNeedsReauth = false;
+  Out.println("STATUS:CONNECTED");
   return true;
 }
 
@@ -418,45 +435,45 @@ bool connectECU() {
 bool reauthForRead(unsigned long seedTimeoutMs = 20000) {
   uint8_t resp[8];
 
-  Serial.println("STEP:Reauth_Handshake");
+  Out.println("STEP:Reauth_Handshake");
   send8(0x00, 0x00, 0x00, 0x02, 0, 0, 0, 0);
   waitResponse(resp, 500);
 
-  Serial.println("STEP:Reauth_SecAccess");
+  Out.println("STEP:Reauth_SecAccess");
   send8(0x04, 0x7D, 0x4E, 0x42, 0x31, 0, 0, 0);
   if (!waitResponse(resp, 500)) {
-    Serial.println("ERR:REAUTH_NO_SECACCESS_RESP");
+    Out.println("ERR:REAUTH_NO_SECACCESS_RESP");
     return false;
   }
 
-  Serial.println("STEP:Reauth_WaitSeed1");
+  Out.println("STEP:Reauth_WaitSeed1");
   if (!waitSeedAndAnswer(seedTimeoutMs)) {
-    Serial.println("ERR:REAUTH_NO_SEED1");
+    Out.println("ERR:REAUTH_NO_SEED1");
     return false;
   }
 
-  Serial.println("STEP:Reauth_WriteCalBlocks");
+  Out.println("STEP:Reauth_WriteCalBlocks");
   for (int i = 0; i < NUM_BLOCKS; i++) {
     uint16_t addr = BLOCKS[i].addr;
     uint8_t page = 0x78;
     uint8_t group = (uint8_t)(addr >> 8);
     int dataLen = (i == NUM_BLOCKS - 1) ? 51 : 65;
     if (!writeBlock(page, group, BLOCKS[i].data, dataLen)) {
-      Serial.print("ERR:REAUTH_WB_FAIL:");
-      Serial.println(i);
+      Out.print("ERR:REAUTH_WB_FAIL:");
+      Out.println(i);
       return false;
     }
   }
-  Serial.println("STEP:Reauth_WriteCalBlocks_OK");
+  Out.println("STEP:Reauth_WriteCalBlocks_OK");
 
-  Serial.println("STEP:Reauth_WaitSeed2");
+  Out.println("STEP:Reauth_WaitSeed2");
   waitSeed2AndAnswer(10000);
 
   delay(78); send8(0x00, 0x00, 0x00, 0x02, 0, 0, 0, 0); drainRX(50);
   delay(77); send8(0x00, 0x00, 0x00, 0x02, 0, 0, 0, 0); drainRX(50);
   delay(77); send8(0x00, 0x00, 0x00, 0x02, 0, 0, 0, 0); drainRX(50);
 
-  Serial.println("STEP:Reauth_Done");
+  Out.println("STEP:Reauth_Done");
   return true;
 }
 
@@ -478,34 +495,44 @@ String nextDumpFilename() {
 }
 
 void readFlash(bool skipHandshake = false) {
-  Serial.println("STATUS:READING");
+  Out.println("STATUS:READING");
 
   const uint16_t SECTS[][2] = {{0x7800, 0x79FF}, {0x7E00, 0x7FFF}};
   int total = 0;
   for (auto& s : SECTS) total += s[1] - s[0] + 1;
 
-  // CHANGE: the old simple "00 00 00 02" handshake has been replaced
-  // with reauthForRead() - this is ALWAYS needed, since the ECU may
-  // have dropped back into normal mode in the meantime (e.g.
-  // immediately after WRITEFULL, without a power cycle). See the
-  // reauthForRead() comment and the write_read_log.csv analysis: a
-  // plain handshake is no longer enough, the same security-access +
-  // calibration-block sequence that Flex uses is required. This is
-  // harmless even if the ECU was already unlocked - rewriting the
-  // blocks with the same data changes nothing.
+  webReadDone = 0;
+  webReadErrors = 0;
+
+  // FIX: two different pre-read sequences depending on the ECU state:
+  //  - right after CONNECT (ECU still unlocked): the simple "00 00 00 02"
+  //    handshake, exactly as before. A security-access request is NOT
+  //    answered in this state, so re-authenticating here would fail.
+  //  - after a WRITEFULL (ECU back in normal mode, see write_read_log.csv):
+  //    the full reauthForRead() sequence that Flex uses. Once it
+  //    succeeds the ECU is unlocked again, so further reads use the
+  //    simple handshake.
   if (!skipHandshake) {
-    Serial.println("STEP:PreReadReauth");
-    if (!reauthForRead()) {
-      Serial.println("ERR:REAUTH_FAILED");
-      Serial.print("WARN:INCOMPLETE_READ:");
-      Serial.println(total);
-      webReadErrors = total;
-      Serial.print("STATUS:READ_DONE:0:ERR:");
-      Serial.println(total);
-      return;
+    if (!ecuNeedsReauth) {
+      Out.println("STEP:PreReadHandshake");
+      uint8_t hs[8];
+      send8(0x00, 0x00, 0x00, 0x02, 0, 0, 0, 0);
+      waitResponse(hs, 500);
+    } else {
+      Out.println("STEP:PreReadReauth");
+      if (!reauthForRead()) {
+        Out.println("ERR:REAUTH_FAILED");
+        Out.print("WARN:INCOMPLETE_READ:");
+        Out.println(total);
+        webReadErrors = total;
+        Out.print("STATUS:READ_DONE:0:ERR:");
+        Out.println(total);
+        return;
+      }
+      ecuNeedsReauth = false;
     }
   } else {
-    Serial.println("STEP:PreReadHandshake_SKIPPED");
+    Out.println("STEP:PreReadHandshake_SKIPPED");
   }
 
   int done = 0, errors = 0;
@@ -517,10 +544,10 @@ void readFlash(bool skipHandshake = false) {
     dumpFile = SD.open(dumpName, FILE_WRITE);
     if (dumpFile) {
       sdWriting = true;
-      Serial.print("STEP:SD_DUMP_START:");
-      Serial.println(dumpName);
+      Out.print("STEP:SD_DUMP_START:");
+      Out.println(dumpName);
     } else {
-      Serial.println("ERR:SD_OPEN_FAIL");
+      Out.println("ERR:SD_OPEN_FAIL");
     }
   }
 
@@ -556,8 +583,8 @@ void readFlash(bool skipHandshake = false) {
           delay(1);
         }
         if (!sent) {
-          Serial.print("ERR:SEND:0x");
-          Serial.println(addr, HEX);
+          Out.print("ERR:SEND:0x");
+          Out.println(addr, HEX);
           continue;
         }
 
@@ -572,10 +599,10 @@ void readFlash(bool skipHandshake = false) {
         }
 
         if (received == 0 && attempt < 2) {
-          Serial.print("STEP:RETRY:0x");
-          Serial.print(addr, HEX);
-          Serial.print(":");
-          Serial.println(attempt + 1);
+          Out.print("STEP:RETRY:0x");
+          Out.print(addr, HEX);
+          Out.print(":");
+          Out.println(attempt + 1);
         }
       }
 
@@ -585,8 +612,8 @@ void readFlash(bool skipHandshake = false) {
         // file content is always deterministic and you don't have to
         // guess what the SD card's filesystem leaves by default in
         // unwritten spots.
-        Serial.print("ERR:NO_RESP:0x");
-        Serial.println(addr, HEX);
+        Out.print("ERR:NO_RESP:0x");
+        Out.println(addr, HEX);
         errors++;
         if (failedCount < 64) failedAddrs[failedCount++] = addr;
 
@@ -602,16 +629,18 @@ void readFlash(bool skipHandshake = false) {
         continue;
       }
 
-      Serial.print("DATA:0x");
-      if (addr < 0x1000) Serial.print("0");
-      Serial.print(addr, HEX);
-      Serial.print(":");
+      bleMute = true;   // per-block data only to USB, not to the phone
+      Out.print("DATA:0x");
+      if (addr < 0x1000) Out.print("0");
+      Out.print(addr, HEX);
+      Out.print(":");
       for (int i = 0; i < received * 8; i++) {
-        if (blockBuf[i] < 0x10) Serial.print("0");
-        Serial.print(blockBuf[i], HEX);
-        if (i < received * 8 - 1) Serial.print(" ");
+        if (blockBuf[i] < 0x10) Out.print("0");
+        Out.print(blockBuf[i], HEX);
+        if (i < received * 8 - 1) Out.print(" ");
       }
-      Serial.println();
+      Out.println();
+      bleMute = false;
 
       if (sdWriting) {
         long off = addrToBinOffset(addr);
@@ -623,10 +652,10 @@ void readFlash(bool skipHandshake = false) {
 
       done++;
       if (done % 32 == 0) {
-        Serial.print("PROGRESS:");
-        Serial.print(done);
-        Serial.print("/");
-        Serial.println(total);
+        Out.print("PROGRESS:");
+        Out.print(done);
+        Out.print("/");
+        Out.println(total);
       }
       webProgressPct = (done * 100) / total;
     }
@@ -634,7 +663,7 @@ void readFlash(bool skipHandshake = false) {
 
   if (sdWriting) {
     dumpFile.close();
-    Serial.println("STEP:SD_DUMP_DONE");
+    Out.println("STEP:SD_DUMP_DONE");
   }
 
   // CHANGE: a clear summary if anything failed - shows exactly which
@@ -642,27 +671,28 @@ void readFlash(bool skipHandshake = false) {
   // actual read result. If errors==0, the whole file is 100%
   // confirmed real ECU content.
   if (errors > 0) {
-    Serial.print("WARN:INCOMPLETE_READ:");
-    Serial.println(errors);
-    Serial.print("WARN:FAILED_ADDRS:");
+    Out.print("WARN:INCOMPLETE_READ:");
+    Out.println(errors);
+    Out.print("WARN:FAILED_ADDRS:");
     for (int i = 0; i < failedCount; i++) {
-      Serial.print("0x");
-      Serial.print(failedAddrs[i], HEX);
-      if (i < failedCount - 1) Serial.print(",");
+      Out.print("0x");
+      Out.print(failedAddrs[i], HEX);
+      if (i < failedCount - 1) Out.print(",");
     }
     if (errors > failedCount) {
-      Serial.print(",...(+");
-      Serial.print(errors - failedCount);
-      Serial.print(" more)");
+      Out.print(",...(+");
+      Out.print(errors - failedCount);
+      Out.print(" more)");
     }
-    Serial.println();
+    Out.println();
   }
 
   webReadErrors = errors;
-  Serial.print("STATUS:READ_DONE:");
-  Serial.print(done);
-  Serial.print(":ERR:");
-  Serial.println(errors);
+  webReadDone = done;
+  Out.print("STATUS:READ_DONE:");
+  Out.print(done);
+  Out.print(":ERR:");
+  Out.println(errors);
 }
 
 void readFileBlock(File& f, long offset, size_t fileSize, uint8_t* buf) {
@@ -704,21 +734,26 @@ bool confirmBlock(uint8_t page, uint8_t counter) {
 }
 
 bool writeFullFlash(const char* filename) {
-  if (!connected) { Serial.println("ERR:WRITEFULL_NOT_CONNECTED"); return false; }
-  if (!sdReady) { Serial.println("ERR:WRITEFULL_SD_NOT_READY"); return false; }
+  webFailReason = "";
+  webFixedFile = "";
+  webProgressPct = 0;
+  webStatusText = "Checking file...";
+  if (!connected) { Out.println("ERR:WRITEFULL_NOT_CONNECTED"); webFailReason = "not connected to the ECU"; return false; }
+  if (!sdReady) { Out.println("ERR:WRITEFULL_SD_NOT_READY"); webFailReason = "SD card not found"; return false; }
 
   // First, quick size check - no point checking the checksum if the
   // file isn't even the right length to begin with.
   {
     File sizeCheck = SD.open(filename, FILE_READ);
-    if (!sizeCheck) { Serial.println("ERR:WRITEFULL_FILE_NOT_FOUND"); return false; }
+    if (!sizeCheck) { Out.println("ERR:WRITEFULL_FILE_NOT_FOUND"); webFailReason = "file not found on the SD card"; return false; }
     size_t sz = sizeCheck.size();
     sizeCheck.close();
     if (sz != EXPECTED_BIN_SIZE) {
-      Serial.print("ERR:WRITEFULL_BAD_FILESIZE:");
-      Serial.print(sz);
-      Serial.print(":EXPECTED:");
-      Serial.println(EXPECTED_BIN_SIZE);
+      Out.print("ERR:WRITEFULL_BAD_FILESIZE:");
+      Out.print(sz);
+      Out.print(":EXPECTED:");
+      Out.println(EXPECTED_BIN_SIZE);
+      webFailReason = "wrong file size (" + String((unsigned long)sz) + " bytes, expected 262144)";
       return false;
     }
   }
@@ -730,32 +765,38 @@ bool writeFullFlash(const char* filename) {
   // instead a new, correctly-calculated copy is created on the SD
   // card ("<name>_CHK_OK.bin") and that one is written instead. If the
   // file's checksum is already fine, the original is used directly.
-  Serial.println("STEP:WriteFull_ChecksumVerify");
+  Out.println("STEP:WriteFull_ChecksumVerify");
+  webStatusText = "Checking checksum...";
   String useFilename;
   int chkResult = verifyAndFixChecksum(filename, useFilename);
   if (chkResult < 0) {
-    Serial.println("STATUS:WRITEFULL_FAILED");
+    Out.println("STATUS:WRITEFULL_FAILED");
     return false;
   }
   if (chkResult == 1) {
-    Serial.print("STATUS:WRITEFULL_USING_FIXED_FILE:");
-    Serial.println(useFilename);
+    Out.print("STATUS:WRITEFULL_USING_FIXED_FILE:");
+    Out.println(useFilename);
+    webFixedFile = useFilename;
+    webStatusText = "Checksum was wrong - corrected file created";
+  } else {
+    webStatusText = "Checksum OK";
   }
 
   File f = SD.open(useFilename, FILE_READ);
-  if (!f) { Serial.println("ERR:WRITEFULL_FILE_NOT_FOUND"); return false; }
+  if (!f) { Out.println("ERR:WRITEFULL_FILE_NOT_FOUND"); webFailReason = "file not found on the SD card"; return false; }
 
   size_t fileSize = f.size();
-  Serial.print("STEP:WriteFull_FileSize:");
-  Serial.println(fileSize);
+  Out.print("STEP:WriteFull_FileSize:");
+  Out.println(fileSize);
 
   // For safety, check the size once more on the final (possibly
   // corrected) file too - the copy must end up exactly the same size.
   if (fileSize != EXPECTED_BIN_SIZE) {
-    Serial.print("ERR:WRITEFULL_BAD_FILESIZE:");
-    Serial.print(fileSize);
-    Serial.print(":EXPECTED:");
-    Serial.println(EXPECTED_BIN_SIZE);
+    Out.print("ERR:WRITEFULL_BAD_FILESIZE:");
+    Out.print(fileSize);
+    Out.print(":EXPECTED:");
+    Out.println(EXPECTED_BIN_SIZE);
+    webFailReason = "wrong file size (" + String((unsigned long)fileSize) + " bytes, expected 262144)";
     f.close();
     return false;
   }
@@ -766,10 +807,12 @@ bool writeFullFlash(const char* filename) {
   int stepCount = 0;
   uint8_t resp[8];
 
-  Serial.println("STEP:WriteFull_Phase0_Preamble");
+  Out.println("STEP:WriteFull_Phase0_Preamble");
+  webStatusText = "Starting write...";
   send8(0x00, 0x00, 0x00, 0x02, 0, 0, 0, 0);
   if (!waitResponse(resp, 1000)) {
-    Serial.println("ERR:WRITEFULL_NO_PREAMBLE");
+    Out.println("ERR:WRITEFULL_NO_PREAMBLE");
+    webFailReason = "ECU did not respond - nothing was changed";
     ok = false;
   }
   stepCount++;
@@ -781,24 +824,29 @@ bool writeFullFlash(const char* filename) {
   const long baseS2[2] = {0x20000, 0x30000};
 
   if (ok) {
-    Serial.println("STEP:WriteFull_Phase1_EraseSection1");
+    // The ECU accepted the write session - from here on it will leave the
+    // unlocked state, so the next READ must re-authenticate first.
+    ecuNeedsReauth = true;
+    Out.println("STEP:WriteFull_Phase1_EraseSection1");
+    webStatusText = "Erasing section 1/2...";
     for (int p = 0; p < 2 && ok; p++) {
       for (int c = 0; c < 256 && ok; c += 4) {
         if (!eraseCheck(pagesS1[p], (uint8_t)c)) {
-          Serial.print("ERR:WRITEFULL_ERASE_FAIL:");
-          Serial.print(pagesS1[p], HEX);
-          Serial.print(":");
-          Serial.println(c, HEX);
+          webFailReason = "ECU did not confirm erasing - check cable/connector";
+          Out.print("ERR:WRITEFULL_ERASE_FAIL:");
+          Out.print(pagesS1[p], HEX);
+          Out.print(":");
+          Out.println(c, HEX);
           ok = false;
           break;
         }
         stepCount++;
         webProgressPct = (stepCount * 100) / totalSteps;
         if (stepCount % 32 == 0) {
-          Serial.print("PROGRESS:");
-          Serial.print(stepCount);
-          Serial.print("/");
-          Serial.println(totalSteps);
+          Out.print("PROGRESS:");
+          Out.print(stepCount);
+          Out.print("/");
+          Out.println(totalSteps);
         }
         yield();
       }
@@ -806,7 +854,8 @@ bool writeFullFlash(const char* filename) {
   }
 
   if (ok) {
-    Serial.println("STEP:WriteFull_Phase2_WriteSection1");
+    Out.println("STEP:WriteFull_Phase2_WriteSection1");
+    webStatusText = "Writing section 1/2...";
     for (int p = 0; p < 2 && ok; p++) {
       for (int c = 0; c < 256 && ok; c++) {
         long off = baseS1[p] + (long)c * 256;
@@ -814,28 +863,30 @@ bool writeFullFlash(const char* filename) {
         readFileBlock(f, off, fileSize, buf);
 
         if (!loadBuffer256(buf)) {
-          Serial.print("ERR:WRITEFULL_LOAD_FAIL:");
-          Serial.print(pagesS1[p], HEX);
-          Serial.print(":");
-          Serial.println(c, HEX);
+          webFailReason = "ECU did not confirm a data block - check cable/connector";
+          Out.print("ERR:WRITEFULL_LOAD_FAIL:");
+          Out.print(pagesS1[p], HEX);
+          Out.print(":");
+          Out.println(c, HEX);
           ok = false;
           break;
         }
         if (!confirmBlock(pagesS1[p], (uint8_t)c)) {
-          Serial.print("ERR:WRITEFULL_CONFIRM_FAIL:");
-          Serial.print(pagesS1[p], HEX);
-          Serial.print(":");
-          Serial.println(c, HEX);
+          webFailReason = "ECU did not confirm programming - check cable/connector";
+          Out.print("ERR:WRITEFULL_CONFIRM_FAIL:");
+          Out.print(pagesS1[p], HEX);
+          Out.print(":");
+          Out.println(c, HEX);
           ok = false;
           break;
         }
         stepCount += 2;
         webProgressPct = (stepCount * 100) / totalSteps;
         if (stepCount % 64 == 0) {
-          Serial.print("PROGRESS:");
-          Serial.print(stepCount);
-          Serial.print("/");
-          Serial.println(totalSteps);
+          Out.print("PROGRESS:");
+          Out.print(stepCount);
+          Out.print("/");
+          Out.println(totalSteps);
         }
         yield();
       }
@@ -843,24 +894,26 @@ bool writeFullFlash(const char* filename) {
   }
 
   if (ok) {
-    Serial.println("STEP:WriteFull_Phase3_EraseSection2");
+    Out.println("STEP:WriteFull_Phase3_EraseSection2");
+    webStatusText = "Erasing section 2/2...";
     for (int p = 0; p < 2 && ok; p++) {
       for (int c = 0; c < 256 && ok; c += 4) {
         if (!eraseCheck(pagesS2[p], (uint8_t)c)) {
-          Serial.print("ERR:WRITEFULL_ERASE_FAIL:");
-          Serial.print(pagesS2[p], HEX);
-          Serial.print(":");
-          Serial.println(c, HEX);
+          webFailReason = "ECU did not confirm erasing - check cable/connector";
+          Out.print("ERR:WRITEFULL_ERASE_FAIL:");
+          Out.print(pagesS2[p], HEX);
+          Out.print(":");
+          Out.println(c, HEX);
           ok = false;
           break;
         }
         stepCount++;
         webProgressPct = (stepCount * 100) / totalSteps;
         if (stepCount % 32 == 0) {
-          Serial.print("PROGRESS:");
-          Serial.print(stepCount);
-          Serial.print("/");
-          Serial.println(totalSteps);
+          Out.print("PROGRESS:");
+          Out.print(stepCount);
+          Out.print("/");
+          Out.println(totalSteps);
         }
         yield();
       }
@@ -868,7 +921,8 @@ bool writeFullFlash(const char* filename) {
   }
 
   if (ok) {
-    Serial.println("STEP:WriteFull_Phase4_WriteSection2");
+    Out.println("STEP:WriteFull_Phase4_WriteSection2");
+    webStatusText = "Writing section 2/2...";
     for (int p = 0; p < 2 && ok; p++) {
       for (int c = 0; c < 256 && ok; c++) {
         long off = baseS2[p] + (long)c * 256;
@@ -876,28 +930,30 @@ bool writeFullFlash(const char* filename) {
         readFileBlock(f, off, fileSize, buf);
 
         if (!loadBuffer256(buf)) {
-          Serial.print("ERR:WRITEFULL_LOAD_FAIL:");
-          Serial.print(pagesS2[p], HEX);
-          Serial.print(":");
-          Serial.println(c, HEX);
+          webFailReason = "ECU did not confirm a data block - check cable/connector";
+          Out.print("ERR:WRITEFULL_LOAD_FAIL:");
+          Out.print(pagesS2[p], HEX);
+          Out.print(":");
+          Out.println(c, HEX);
           ok = false;
           break;
         }
         if (!confirmBlock(pagesS2[p], (uint8_t)c)) {
-          Serial.print("ERR:WRITEFULL_CONFIRM_FAIL:");
-          Serial.print(pagesS2[p], HEX);
-          Serial.print(":");
-          Serial.println(c, HEX);
+          webFailReason = "ECU did not confirm programming - check cable/connector";
+          Out.print("ERR:WRITEFULL_CONFIRM_FAIL:");
+          Out.print(pagesS2[p], HEX);
+          Out.print(":");
+          Out.println(c, HEX);
           ok = false;
           break;
         }
         stepCount += 2;
         webProgressPct = (stepCount * 100) / totalSteps;
         if (stepCount % 64 == 0) {
-          Serial.print("PROGRESS:");
-          Serial.print(stepCount);
-          Serial.print("/");
-          Serial.println(totalSteps);
+          Out.print("PROGRESS:");
+          Out.print(stepCount);
+          Out.print("/");
+          Out.println(totalSteps);
         }
         yield();
       }
@@ -907,7 +963,8 @@ bool writeFullFlash(const char* filename) {
   f.close();
 
   if (ok) {
-    Serial.println("STEP:WriteFull_Phase5_End");
+    Out.println("STEP:WriteFull_Phase5_End");
+    webStatusText = "Finishing...";
     send8(0x01, 0x00, 0x00, 0x02, 0x01, 0x00, 0x00, 0x00);
     waitResponse(resp, 1500);
   }
@@ -916,69 +973,71 @@ bool writeFullFlash(const char* filename) {
   webWriteOk = ok;
 
   if (ok) {
-    Serial.println("STATUS:WRITEFULL_DONE");
+    Out.println("STATUS:WRITEFULL_DONE");
   } else {
-    Serial.println("STATUS:WRITEFULL_FAILED");
+    Out.println("STATUS:WRITEFULL_FAILED");
   }
   return ok;
 }
 
 void listSDFiles() {
   File root = SD.open("/");
-  if (!root) { Serial.println("ERR:SD_LIST_FAIL"); return; }
+  if (!root) { Out.println("ERR:SD_LIST_FAIL"); return; }
   int count = 0;
   File f = root.openNextFile();
   while (f) {
     if (!f.isDirectory()) {
-      Serial.print("SDFILE:");
-      Serial.print(f.name());
-      Serial.print(":");
-      Serial.println(f.size());
+      Out.print("SDFILE:");
+      Out.print(f.name());
+      Out.print(":");
+      Out.println(f.size());
       count++;
     }
     f.close();
     f = root.openNextFile();
   }
   root.close();
-  Serial.print("STEP:SD_FILE_COUNT:");
-  Serial.println(count);
-  Serial.println("SDLIST_DONE");
+  Out.print("STEP:SD_FILE_COUNT:");
+  Out.println(count);
+  Out.println("SDLIST_DONE");
 }
 
 void sendSDFile(String filename) {
   if (!filename.startsWith("/")) filename = "/" + filename;
   File f = SD.open(filename, FILE_READ);
-  if (!f) { Serial.println("ERR:SD_FILE_NOT_FOUND"); return; }
-  Serial.print("SDSIZE:");
-  Serial.println(f.size());
+  if (!f) { Out.println("ERR:SD_FILE_NOT_FOUND"); return; }
+  Out.print("SDSIZE:");
+  Out.println(f.size());
+  bleBlocking = true;   // nothing time-critical here - let BLE slow us down
   uint8_t buf[128];
   while (f.available()) {
     int n = f.read(buf, sizeof(buf));
-    Serial.print("SDDATA:");
+    Out.print("SDDATA:");
     for (int i = 0; i < n; i++) {
-      if (buf[i] < 0x10) Serial.print("0");
-      Serial.print(buf[i], HEX);
+      if (buf[i] < 0x10) Out.print("0");
+      Out.print(buf[i], HEX);
     }
-    Serial.println();
+    Out.println();
   }
   f.close();
-  Serial.println("SDGET_DONE");
+  Out.println("SDGET_DONE");
+  bleBlocking = false;
 }
 
 void deleteSDFile(String filename) {
   if (!filename.startsWith("/")) filename = "/" + filename;
-  if (SD.remove(filename)) Serial.println("STATUS:SD_DELETED");
-  else Serial.println("ERR:SD_DELETE_FAIL");
+  if (SD.remove(filename)) Out.println("STATUS:SD_DELETED");
+  else Out.println("ERR:SD_DELETE_FAIL");
 }
 
 void handleUploadStart(String filename, size_t expectedSize) {
-  if (!sdReady) { Serial.println("ERR:UPLOAD_SD_NOT_READY"); return; }
+  if (!sdReady) { Out.println("ERR:UPLOAD_SD_NOT_READY"); return; }
   if (!filename.startsWith("/")) filename = "/" + filename;
   if (SD.exists(filename)) SD.remove(filename);
   uploadFile = SD.open(filename, FILE_WRITE);
-  if (!uploadFile) { Serial.println("ERR:UPLOAD_OPEN_FAIL"); return; }
+  if (!uploadFile) { Out.println("ERR:UPLOAD_OPEN_FAIL"); return; }
   uploadActive = true;
-  Serial.println("STATUS:UPLOAD_READY");
+  Out.println("STATUS:UPLOAD_READY");
 }
 
 int hexNibble(char c) {
@@ -1000,27 +1059,27 @@ bool parseHexBytes(const String& s, uint8_t* out, int outLen) {
 }
 
 void handleUploadChunk(const String& hexData) {
-  if (!uploadActive) { Serial.println("ERR:UPLOAD_NOT_ACTIVE"); return; }
+  if (!uploadActive) { Out.println("ERR:UPLOAD_NOT_ACTIVE"); return; }
   int len = hexData.length() / 2;
   static uint8_t buf[512];
   if (len > (int)sizeof(buf)) len = sizeof(buf);
   if (!parseHexBytes(hexData, buf, len)) {
-    Serial.println("ERR:UPLOAD_BAD_HEX");
+    Out.println("ERR:UPLOAD_BAD_HEX");
     return;
   }
   uploadFile.write(buf, len);
-  Serial.println("STATUS:CHUNK_OK");
+  Out.println("STATUS:CHUNK_OK");
 }
 
 void handleUploadDone() {
-  if (!uploadActive) { Serial.println("ERR:UPLOAD_NOT_ACTIVE"); return; }
+  if (!uploadActive) { Out.println("ERR:UPLOAD_NOT_ACTIVE"); return; }
   uploadFile.close();
   uploadActive = false;
 
   // CHANGE: check right after upload whether the file has the correct
   // size - lets the user know immediately, rather than only once they
   // later run WRITEFULL.
-  Serial.println("STATUS:UPLOAD_DONE");
+  Out.println("STATUS:UPLOAD_DONE");
 }
 
 // =====================================================================
@@ -1029,7 +1088,7 @@ void handleUploadDone() {
 // command and the web UI's /reset endpoint.
 // =====================================================================
 void doEspRestart() {
-  Serial.println("STATUS:RESETTING");
+  Out.println("STATUS:RESETTING");
   if (uploadActive) { uploadFile.close(); uploadActive = false; }
   if (dumpFile) dumpFile.close();
   Serial.flush();
@@ -1046,10 +1105,10 @@ void handleSerialLine(String line) {
 
   if (line == "CONNECT") {
     connected = connectECU();
-    if (!connected) Serial.println("STATUS:CONNECT_FAILED");
+    if (!connected) Out.println("STATUS:CONNECT_FAILED");
   }
   else if (line == "READ") {
-    if (!connected) { Serial.println("ERR:NOT_CONNECTED"); return; }
+    if (!connected) { Out.println("ERR:NOT_CONNECTED"); return; }
     reading = true;
     readFlash();
     reading = false;
@@ -1061,27 +1120,27 @@ void handleSerialLine(String line) {
   // version (whether "ERR:NO_RESP" goes away or not) gives real
   // information without needing a CAN log.
   else if (line == "READ_NOHS") {
-    if (!connected) { Serial.println("ERR:NOT_CONNECTED"); return; }
+    if (!connected) { Out.println("ERR:NOT_CONNECTED"); return; }
     reading = true;
     readFlash(true);
     reading = false;
   }
   else if (line == "SDLIST") {
-    if (!sdReady) { Serial.println("ERR:SD_NOT_READY"); return; }
+    if (!sdReady) { Out.println("ERR:SD_NOT_READY"); return; }
     listSDFiles();
   }
   else if (line.startsWith("SDGET:")) {
-    if (!sdReady) { Serial.println("ERR:SD_NOT_READY"); return; }
+    if (!sdReady) { Out.println("ERR:SD_NOT_READY"); return; }
     sendSDFile(line.substring(6));
   }
   else if (line.startsWith("SDDEL:")) {
-    if (!sdReady) { Serial.println("ERR:SD_NOT_READY"); return; }
+    if (!sdReady) { Out.println("ERR:SD_NOT_READY"); return; }
     deleteSDFile(line.substring(6));
   }
   else if (line.startsWith("WUPLOAD:")) {
     String rest = line.substring(8);
     int sep = rest.indexOf(':');
-    if (sep < 0) { Serial.println("ERR:UPLOAD_BAD_FORMAT"); return; }
+    if (sep < 0) { Out.println("ERR:UPLOAD_BAD_FORMAT"); return; }
     String fname = rest.substring(0, sep);
     size_t size = (size_t)strtoul(rest.substring(sep + 1).c_str(), NULL, 10);
     handleUploadStart(fname, size);
@@ -1106,20 +1165,20 @@ void handleSerialLine(String line) {
     while (millis() - start < ms) {
       if (ESP32Can.readFrame(rxFrame, 20)) {
         count++;
-        Serial.print("UNEXPECTED_FRAME:id=0x");
-        Serial.print(rxFrame.identifier, HEX);
-        Serial.print(" data=");
+        Out.print("UNEXPECTED_FRAME:id=0x");
+        Out.print(rxFrame.identifier, HEX);
+        Out.print(" data=");
         for (int i = 0; i < 8; i++) {
-          if (rxFrame.data[i] < 0x10) Serial.print("0");
-          Serial.print(rxFrame.data[i], HEX);
-          Serial.print(" ");
+          if (rxFrame.data[i] < 0x10) Out.print("0");
+          Out.print(rxFrame.data[i], HEX);
+          Out.print(" ");
         }
-        Serial.println();
+        Out.println();
       }
       yield();
     }
-    if (count == 0) Serial.println("STATUS:BUS_SILENT");
-    else { Serial.print("STATUS:BUS_NOT_SILENT:"); Serial.println(count); }
+    if (count == 0) Out.println("STATUS:BUS_SILENT");
+    else { Out.print("STATUS:BUS_NOT_SILENT:"); Out.println(count); }
   }
   else if (line == "DTC_READ") {
     readDTCs();
@@ -1137,8 +1196,8 @@ void handleSerialLine(String line) {
   else if (line == "RESET") {
     doEspRestart();
   }
-  else if (line == "PING") Serial.println("PONG");
-  else if (line == "STATUS") Serial.println(connected ? "STATUS:CONNECTED" : "STATUS:DISCONNECTED");
+  else if (line == "PING") Out.println("PONG");
+  else if (line == "STATUS") Out.println(connected ? "STATUS:CONNECTED" : "STATUS:DISCONNECTED");
 }
 
 void setup() {
@@ -1148,24 +1207,25 @@ void setup() {
   ESP32Can.setTxQueueSize(10);
   ESP32Can.setPins(CAN_TX, CAN_RX);
   if (ESP32Can.begin(ESP32Can.convertSpeed(500)))
-    Serial.println("STATUS:CAN_OK");
+    Out.println("STATUS:CAN_OK");
   else {
-    Serial.println("STATUS:CAN_FAIL");
+    Out.println("STATUS:CAN_FAIL");
     return;
   }
 
   SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
   if (SD.begin(SD_CS, SPI, 4000000)) {
     sdReady = true;
-    Serial.println("STATUS:SD_OK");
+    Out.println("STATUS:SD_OK");
   } else {
     sdReady = false;
-    Serial.println("STATUS:SD_FAIL");
+    Out.println("STATUS:SD_FAIL");
   }
 
   setupWebUI();
+  setupBLE();
 
-  Serial.println("STATUS:READY");
+  Out.println("STATUS:READY");
 }
 
 void loop() {
@@ -1178,6 +1238,7 @@ void loop() {
       serialBuf += c;
     }
   }
+  bleRxPoll(handleSerialLine);
   loopWebUI();
   yield();
 }

@@ -17,6 +17,142 @@ WRITEFULL_TOTAL_STEPS = 2306
 UPLOAD_CHUNK_SIZE = 256
 
 
+# ECU connector A pinout (front view), PNG, base64. Embedded so the GUI
+# stays a single file. Coloured pins: yellow B1 = CAN-H, blue C1 = CAN-L,
+# red A4/B4 = +12 V, black M4 = GND.
+WIRING_PNG_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAtsAAAFoCAMAAACxGMfcAAADAFBMVEX///8AAABaWlr/8B4eNP/o"
+    "HxsUFBQoKCg8PDxQUFBkZGR4eHiMjIygoKC0tLTIyMjc3Nzw8PAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAADbxU3lAAAVGklEQVR42u2d67arKpQGE7tbQBDh/V+2zW2Zs4OoCF6SqjHOn8PG"
+    "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"
+    "7cUp4O5u15u57XH7u9xucRu3cRu3cRu3cRu3cftIbnMvidvbZoCi3ghZ4LqttvrwwuH26dweWXql"
+    "ACUS4s0+vOPZzQndBp5L4jbgNm4DbuM24DZuA27jNuA24DZuA27jNuA2bgNu4zbgNm4DbgNu4zYU"
+    "wXchfGTZmCAtbk/RvS3lpd3y9svE8kI+X3uBza/9dCmYa2iQ+Pj7D134hYn3w9w53A7Qvu8vu7zd"
+    "/L3fIIIvIDRDe3DxVDm8AhDaXTrefardq6HdxLurS0J7Clp8jhC3q9xua4vbYbdfh2/M7Wi7FsNy"
+    "niG3pXq1q+DiqrV+tYvgusMy2n2q3ddNdPPDsqRNcG3WqfYt1ryedLurr7g94vb/PRlzO9o+HCkb"
+    "dlvHF8Wevaa2Cbs9e83t4DRfU2tqT7UfwW0vpcDtsm63E24Hl0RfuV78kvXkv9XtSnYSt3H7C902"
+    "dedxG7e/0G3b1yO4jdtf6HafMxmj68hc77iN2yd1W98Oeh25cOP2FjkJbpfJAC+OmmTCbTnhttw3"
+    "A/xqtz1uH/C5pL7KJyLsdv1qr8PXbfFqvwbdHrqH3Y6397PCRTdfDd2D7jYT7Ulu1+0H5rrGbc8z"
+    "97Db74Ma7PJ2O4w2CX7diXZv/ppNd8m++Us7tNsCm0+hFSHG7bTT40kujJW6TM2q55e3w1J8kIic"
+    "OojFbbgwfhu3AbdxG3AbtwG3cRtwG7cBtwFwG3AbtwG3cRtwG7cBt3EbcBsAtwG3cRtwG7cBt3Eb"
+    "cBu3AbdxG3AbcBu3AbdxG3AbtwG3cRtwG7cBtwG3cRtwG7cBt3EbcBu3AbdxG3AbcBu3AbdxG3Ab"
+    "twG3cRtwG7cBtwG3cRtwG7cBt3EbcBu3AbdxG3AbcBu3x/BuHH+uAx37Ku5QG8XtTdyW9Tgn+5Fo"
+    "I19FpHpoYhv1uJ3RbZX7Wieu41TncttEvso11W0d2WbtcDvb36yvMvOlwsvIsWu+x+36O93u6qv4"
+    "Drer/iztcBu337+y/A63m15Ejdu4/X701Jdct/uiJPP+xO0zu91eS5Tb+7jdFyVX5XEbt193kiVK"
+    "kp3c7i/c18bjNm7f1O6Pnai+xu1bDHhVOXcpbq9we9d82/ZX7Vp9kdvVzcVadx63f9ptb5trKbV3"
+    "c7uS9e1LyarJgW7qyLETujkROnaaXiudf6N1s9cOUvdHbqKM2vu5XSkR8xF+hVoWM2w3t/u/LdH7"
+    "18UWUlXf6HbVVOpH+Wf4i/jV/aAK2rWv2z9L80/5Kxr2CW5/Cf+6zR7BbdwG3MZt3MZt3MZtwG3c"
+    "hvGE5MFHTvKA/YPb593d8oH499ncA8Uewu0vqUU+Rr6wh3AbtwG3cRu3cRu3cRtwG7fh842MKJI9"
+    "hNvn3d+7jfjEbdwG3AbAbQDcBsBtgPVuK4BTIqfcdhrgnNgLAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AABAbv4fKP1vdnCCytIAAAAASUVORK5CYII="
+)
+
+# (pin, colour name, colour, function, connect to)
+WIRING_ECU = [
+    ('B1', 'yellow', '#fff01e', 'CAN-H', 'CAN transceiver CANH'),
+    ('C1', 'blue', '#1e34ff', 'CAN-L', 'CAN transceiver CANL'),
+    ('A4', 'red', '#e81f1b', '+12 V', '+12 V supply (also acts as ignition)'),
+    ('B4', 'red', '#e81f1b', '+12 V', '+12 V supply (also acts as ignition)'),
+    ('M4', 'black', '#000000', 'GND', 'supply GND + ESP32/transceiver GND'),
+]
+
+WIRING_ESP32 = [
+    ('GPIO 4', 'CAN transceiver TX (CTX)'),
+    ('GPIO 5', 'CAN transceiver RX (CRX)'),
+    ('3.3 V / GND', 'CAN transceiver VCC / GND'),
+    ('GPIO 15', 'SD card CS'),
+    ('GPIO 18', 'SD card SCK'),
+    ('GPIO 17', 'SD card MISO'),
+    ('GPIO 16', 'SD card MOSI'),
+]
+
+
 def addr_to_bin_offset(addr):
     if 0x7800 <= addr <= 0x79FF:
         return (addr - 0x7800) * 256
@@ -106,6 +242,15 @@ class FlasherGUI:
                                     relief='flat', padx=12, pady=6,
                                     cursor='hand2')
         self.btn_reset.pack(side='left', padx=(0, 6))
+
+        # Always available - shows the ECU connector pinout and wiring
+        self.btn_wiring = tk.Button(top, text='WIRING',
+                                     command=self._open_wiring,
+                                     bg='#3c3c3c', fg='white',
+                                     font=('Segoe UI', 10, 'bold'),
+                                     relief='flat', padx=12, pady=6,
+                                     cursor='hand2')
+        self.btn_wiring.pack(side='left', padx=(0, 6))
 
         self.status_label = tk.Label(top, text='● Disconnected',
                                       bg='#2d2d2d', fg='#888888',
@@ -412,7 +557,8 @@ class FlasherGUI:
         self.cal_var.set('---')
         self.date_var.set('---')
         self.ver_var.set('---')
-        self._log('\n---------- Connecting to ECU ----------', 'info')
+        self._log('\n---------- Connect Started ----------', 'info')
+        connect_start = time.time()
         # CHANGE: reuse the serial port if it is already open (it usually
         # is, since the SD list is loaded on startup) instead of
         # re-opening it, which could restart the ESP32.
@@ -466,7 +612,18 @@ class FlasherGUI:
             elif line == 'STATUS:WEBSERVER_STARTED':
                 self._log(line, 'ok')
             elif line == 'STATUS:CONNECTED':
-                self._log('---------- ECU Connected ----------', 'ok')
+                # Short summary of the ECU identification, like commercial tools show
+                elapsed = int(time.time() - connect_start)
+                self._log('', 'info')
+                self._log(f'VIN:          {self.vin_var.get()}', 'ok')
+                self._log(f'HW:           {self.cal_var.get()}', 'ok')
+                self._log(f'HW version:   {self.ver_var.get()}', 'ok')
+                self._log(f'Date:         {self.date_var.get()}', 'ok')
+                self._log('CPU Type:     MC9S12 (M3C)', 'ok')
+                self._log('', 'info')
+                self._log(f'---------- Connect Finished ( Time: '
+                          f'{elapsed // 3600:02d}:{elapsed % 3600 // 60:02d}:{elapsed % 60:02d} ) '
+                          f'----------', 'ok')
                 self.connected = True
                 self.status_label.config(text='● Connected', fg='#4ec9b0')
                 self._set_busy(False)
@@ -474,6 +631,10 @@ class FlasherGUI:
                 return
             elif line == 'STATUS:CONNECT_FAILED':
                 self._log('❌ Connect failed!', 'err')
+                elapsed = int(time.time() - connect_start)
+                self._log(f'---------- Connect Finished with error ( Time: '
+                          f'{elapsed // 3600:02d}:{elapsed % 3600 // 60:02d}:{elapsed % 60:02d} ) '
+                          f'----------', 'err')
                 self.status_label.config(text='● Error', fg='#f44747')
                 break
             elif line:
@@ -664,17 +825,35 @@ class FlasherGUI:
                 self._log(line, 'err')
 
             elif line.startswith('STATUS:READ_DONE'):
-                self.progress_var.set(100)
-                self.progress_label.config(text='100%')
-                if errors == 0:
+                # FIX: use the firmware's own final numbers
+                # ("STATUS:READ_DONE:<read>:ERR:<errors>") - counting lines
+                # here missed the case where nothing could be read at all,
+                # and then wrongly reported "0 errors, file saved".
+                try:
+                    parts = line.split(':')
+                    done = int(parts[2])
+                    errors = int(parts[4])
+                except (IndexError, ValueError):
+                    pass
+                if done == 0:
+                    self.progress_var.set(0)
+                    self.progress_label.config(text='0%')
+                    self._log('❌ Read failed - the ECU did not answer, nothing was '
+                              'read and no file was saved.', 'err')
+                elif errors == 0:
+                    self.progress_var.set(100)
+                    self.progress_label.config(text='100%')
                     self._log(
                         f'✅ Read Done! Read: {done} | Errors: 0 - '
                         f'the whole file is 100% confirmed real ECU content.', 'ok')
+                    self._log('File saved to the SD card - check the SD panel on the right', 'ok')
                 else:
+                    self.progress_var.set(100)
+                    self.progress_label.config(text='100%')
                     self._log(
                         f'⚠ Read Done! Read: {done} | Errors: {errors} - '
                         f'see above which spots are placeholders.', 'err')
-                self._log('File saved to the SD card - check the SD panel on the right', 'ok')
+                    self._log('File saved to the SD card - check the SD panel on the right', 'ok')
                 break
 
             elif line:
@@ -1054,6 +1233,55 @@ class FlasherGUI:
             # immediately in the panel on the right.
             if self._esp_ready():
                 threading.Thread(target=self._sd_refresh_thread, daemon=True).start()
+
+    def _open_wiring(self):
+        win = tk.Toplevel(self.root)
+        win.title('Wiring diagram')
+        win.configure(bg='#1e1e1e')
+        win.resizable(False, False)
+
+        tk.Label(win, text='ECU connector A (front view)', bg='#1e1e1e', fg='#cccccc',
+                 font=('Segoe UI', 11, 'bold')).pack(anchor='w', padx=12, pady=(12, 6))
+        try:
+            img = tk.PhotoImage(data=WIRING_PNG_B64)
+            lbl = tk.Label(win, image=img, bg='#1e1e1e')
+            lbl.image = img  # keep a reference, otherwise Tk drops the image
+            lbl.pack(padx=12)
+        except Exception as e:
+            tk.Label(win, text=f'(image could not be shown: {e})', bg='#1e1e1e',
+                     fg='#f44747', font=('Consolas', 9)).pack(padx=12)
+
+        def table(parent, title, rows):
+            tk.Label(parent, text=title, bg='#1e1e1e', fg='#cccccc',
+                     font=('Segoe UI', 10, 'bold')).pack(anchor='w', padx=12, pady=(12, 4))
+            frm = tk.Frame(parent, bg='#1e1e1e')
+            frm.pack(anchor='w', padx=12)
+            return frm
+
+        frm = table(win, 'ECU side', WIRING_ECU)
+        for r, (pin, cname, col, func, to) in enumerate(WIRING_ECU):
+            tk.Label(frm, text='  ', bg=col, relief='solid', bd=1).grid(
+                row=r, column=0, padx=(0, 8), pady=2)
+            tk.Label(frm, text=pin, bg='#1e1e1e', fg='white',
+                     font=('Consolas', 10, 'bold'), width=4, anchor='w').grid(row=r, column=1, sticky='w')
+            tk.Label(frm, text=f'{func} ({cname})', bg='#1e1e1e', fg='#4ec9b0',
+                     font=('Consolas', 10), width=18, anchor='w').grid(row=r, column=2, sticky='w')
+            tk.Label(frm, text='->  ' + to, bg='#1e1e1e', fg='#d4d4d4',
+                     font=('Consolas', 10), anchor='w').grid(row=r, column=3, sticky='w')
+
+        frm = table(win, 'ESP32 side', WIRING_ESP32)
+        for r, (pin, to) in enumerate(WIRING_ESP32):
+            tk.Label(frm, text=pin, bg='#1e1e1e', fg='white',
+                     font=('Consolas', 10, 'bold'), width=12, anchor='w').grid(row=r, column=0, sticky='w')
+            tk.Label(frm, text='->  ' + to, bg='#1e1e1e', fg='#d4d4d4',
+                     font=('Consolas', 10), anchor='w').grid(row=r, column=1, sticky='w')
+
+        tk.Label(win, text='⚠ The ESP32/transceiver GND MUST be connected to ECU GND (M4), '
+                           'otherwise CAN will not work.\n'
+                           '⚠ CAN bus speed is 500 kbit/s. Make sure the connector and cables '
+                           'cannot move while writing.',
+                 bg='#1e1e1e', fg='#f0a500', font=('Consolas', 9),
+                 justify='left', wraplength=700).pack(anchor='w', padx=12, pady=(12, 12))
 
     def _open_diagnostics(self):
         if self.op_busy:
