@@ -41,10 +41,15 @@ Bosch GmbH or any other trademark mentioned.
 ## Hardware
 
 - ESP32-S3 (or another ESP32 with a CAN transceiver)
-- 3.3 V CAN transceiver (e.g. SN65HVD230), connected to the ECU CAN-H/CAN-L
-  lines (500 kbit/s)
+- CAN transceiver module connected to the ECU CAN-H/CAN-L lines (500 kbit/s).
+  The diagram uses a **TJA1050** module (5 V). Its RX output is 5 V, so it
+  goes to the ESP32 through a **1 kΩ / 2 kΩ voltage divider** (see below).
+  A 3.3 V transceiver (e.g. SN65HVD230) can be connected directly to 3V3
+  instead, without the divider.
 - SD card module (SPI)
 - 12 V power supply for the ECU (battery or bench PSU)
+- 5 V step-down (buck) module, e.g. MP1584EN mini module, to power the
+  ESP32 from the same 12 V (not needed if the ESP32 is powered over USB)
 - (optional) an Android phone for the Bluetooth app, or any phone/browser
   for the WiFi web interface
 
@@ -68,14 +73,30 @@ Bosch GmbH or any other trademark mentioned.
 
 | ESP32 | Connects to |
 |-------|-------------|
-| GPIO 4 (`CAN_TX`) | Transceiver TX / CTX |
-| GPIO 5 (`CAN_RX`) | Transceiver RX / CRX |
+| GPIO 4 (`CAN_TX`) | Transceiver TX |
+| GPIO 5 (`CAN_RX`) | Transceiver RX, through the 1 kΩ / 2 kΩ divider |
 | GPIO 15 | SD card CS |
 | GPIO 18 | SD card SCK |
 | GPIO 17 | SD card MISO |
 | GPIO 16 | SD card MOSI |
+| 3V3 / GND | SD card VCC / GND |
+| 5V / VIN | 5 V step-down OUT+ and transceiver VCC |
+| GND | 5 V step-down OUT−, transceiver GND |
 
-> ESP32/transceiver GND **must** be connected to the ECU GND (M4),
+**RX voltage divider** (needed with the 5 V TJA1050): transceiver RX →
+1 kΩ → ESP32 GPIO 5, and GPIO 5 → 2 kΩ → GND. This brings the 5 V RX
+signal down to about 3.3 V; ESP32 pins are not 5 V tolerant. TX needs no
+divider - the TJA1050 accepts the ESP32's 3.3 V signal.
+
+**5 V step-down** (e.g. MP1584EN): IN+ → +12 V (same supply as ECU A4/B4),
+IN− → GND (ECU M4), OUT+ → ESP32 5V/VIN + transceiver VCC,
+OUT− → ESP32 GND + transceiver GND.
+
+> ⚠️ These modules often come set to a higher output voltage. Turn the
+> trimmer until a multimeter shows **5.0 V** on OUT+/OUT− **before**
+> connecting the ESP32, otherwise the ESP32 can be destroyed.
+
+> ESP32/transceiver/step-down GND **must** be connected to the ECU GND (M4),
 > otherwise CAN communication will not work.
 
 ## Structure

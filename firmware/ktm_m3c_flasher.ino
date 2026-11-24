@@ -1024,6 +1024,97 @@ void sendSDFile(String filename) {
   bleBlocking = false;
 }
 
+// ---------------------------------------------------------------------
+// Base64 helpers for the fast phone transfers (SDGETB / WB64). Base64
+// adds 33% instead of the 100% of hex, so less data goes over Bluetooth.
+// ---------------------------------------------------------------------
+static const char B64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+size_t b64Encode(const uint8_t* in, size_t len, char* out) {
+  size_t o = 0;
+  for (size_t i = 0; i < len; i += 3) {
+    uint32_t v = (uint32_t)in[i] << 16;
+    if (i + 1 < len) v |= (uint32_t)in[i + 1] << 8;
+    if (i + 2 < len) v |= in[i + 2];
+    out[o++] = B64[(v >> 18) & 63];
+    out[o++] = B64[(v >> 12) & 63];
+    out[o++] = (i + 1 < len) ? B64[(v >> 6) & 63] : '=';
+    out[o++] = (i + 2 < len) ? B64[v & 63] : '=';
+  }
+  out[o] = 0;
+  return o;
+}
+
+int b64Value(char c) {
+  if (c >= 'A' && c <= 'Z') return c - 'A';
+  if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+  if (c >= '0' && c <= '9') return c - '0' + 52;
+  if (c == '+') return 62;
+  if (c == '/') return 63;
+  return -1;
+}
+
+// Returns the number of decoded bytes, or -1 on bad input.
+int b64Decode(const String& s, uint8_t* out, int outMax) {
+  int n = 0;
+  uint32_t acc = 0;
+  int bits = 0;
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '=') break;
+    int v = b64Value(c);
+    if (v < 0) return -1;
+    acc = (acc << 6) | v;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      if (n >= outMax) return -1;
+      out[n++] = (acc >> bits) & 0xFF;
+    }
+  }
+  return n;
+}
+
+// Fast download for the phone app: same as SDGET, but Base64 and every
+// line carries its file offset ("SDB:<offset>:<base64>") so the app can
+// detect a lost piece. Data lines go to Bluetooth only (not USB serial).
+void sendSDFileB64(String filename) {
+  if (!filename.startsWith("/")) filename = "/" + filename;
+  File f = SD.open(filename, FILE_READ);
+  if (!f) { Out.println("ERR:SD_FILE_NOT_FOUND"); return; }
+  Out.print("SDSIZE:");
+  Out.println(f.size());
+  bleBlocking = true;
+  serialMute = true;
+  static uint8_t buf[360];
+  static char enc[484];
+  long offset = 0;
+  while (f.available()) {
+    int n = f.read(buf, sizeof(buf));
+    if (n <= 0) break;
+    b64Encode(buf, n, enc);
+    Out.print("SDB:");
+    Out.print(offset);
+    Out.print(":");
+    Out.println(enc);
+    offset += n;
+  }
+  serialMute = false;
+  f.close();
+  Out.println("SDGET_DONE");
+  bleBlocking = false;
+}
+
+// Fast upload chunk from the phone app: "WB64:<base64>", up to 1024 bytes.
+void handleUploadChunkB64(const String& b64Data) {
+  if (!uploadActive) { Out.println("ERR:UPLOAD_NOT_ACTIVE"); return; }
+  static uint8_t buf[1024];
+  int len = b64Decode(b64Data, buf, sizeof(buf));
+  if (len < 0) { Out.println("ERR:UPLOAD_BAD_B64"); return; }
+  uploadFile.write(buf, len);
+  Out.println("STATUS:CHUNK_OK");
+}
+
 void deleteSDFile(String filename) {
   if (!filename.startsWith("/")) filename = "/" + filename;
   if (SD.remove(filename)) Out.println("STATUS:SD_DELETED");
@@ -1133,6 +1224,10 @@ void handleSerialLine(String line) {
     if (!sdReady) { Out.println("ERR:SD_NOT_READY"); return; }
     sendSDFile(line.substring(6));
   }
+  else if (line.startsWith("SDGETB:")) {
+    if (!sdReady) { Out.println("ERR:SD_NOT_READY"); return; }
+    sendSDFileB64(line.substring(7));
+  }
   else if (line.startsWith("SDDEL:")) {
     if (!sdReady) { Out.println("ERR:SD_NOT_READY"); return; }
     deleteSDFile(line.substring(6));
@@ -1147,6 +1242,9 @@ void handleSerialLine(String line) {
   }
   else if (line.startsWith("WDATA:")) {
     handleUploadChunk(line.substring(6));
+  }
+  else if (line.startsWith("WB64:")) {
+    handleUploadChunkB64(line.substring(5));
   }
   else if (line == "WUPLOAD_DONE") {
     handleUploadDone();

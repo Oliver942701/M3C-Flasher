@@ -37,13 +37,16 @@
 #define NUS_TX_UUID       "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
 
 // Max payload per notification. The phone app asks for MTU 247
-// (payload 244); this stays a bit below that. If the phone negotiates a
-// smaller MTU, chunks are made smaller automatically.
-#define BLE_MAX_CHUNK      180
+// (payload 244). If the phone negotiates a smaller MTU, chunks are made
+// smaller automatically.
+#define BLE_MAX_CHUNK      244
 // Pause between notifications so the BLE stack's send queue never
 // overflows (otherwise notifications are silently dropped).
-// 180 B every 8 ms = about 20 KB/s.
-#define BLE_NOTIFY_GAP_MS  8
+// Normal output: 244 B every 8 ms. Bulk file download (bleBlocking):
+// 244 B every 4 ms, about 50 KB/s. The app checks every downloaded
+// piece by its offset, so a lost notification is always detected.
+#define BLE_NOTIFY_GAP_MS       8
+#define BLE_NOTIFY_GAP_BULK_MS  4
 
 static BLEServer*         bleServer = nullptr;
 static BLECharacteristic* bleTx = nullptr;
@@ -62,6 +65,10 @@ static String             bleLineBuf = "";
 //   timing is never affected by Bluetooth - excess output is dropped.
 volatile bool bleMute = false;
 volatile bool bleBlocking = false;
+// serialMute: while true, output is NOT sent to USB serial. Used for the
+//   phone-only fast download (SDGETB) - USB serial at 115200 baud would
+//   otherwise limit the speed to ~11 KB/s.
+volatile bool serialMute = false;
 
 // ---------------------------------------------------------------------
 // Queues output bytes for the phone. Called from any task (main loop,
@@ -90,7 +97,7 @@ public:
     return write(&c, 1);
   }
   size_t write(const uint8_t* buf, size_t size) override {
-    Serial.write(buf, size);
+    if (!serialMute) Serial.write(buf, size);
     bleOutWrite(buf, size);
     return size;
   }
@@ -156,7 +163,7 @@ static void bleTxTask(void* arg) {
       bleTx->notify();
     }
     vRingbufferReturnItem(bleTxRing, item);
-    vTaskDelay(pdMS_TO_TICKS(BLE_NOTIFY_GAP_MS));
+    vTaskDelay(pdMS_TO_TICKS(bleBlocking ? BLE_NOTIFY_GAP_BULK_MS : BLE_NOTIFY_GAP_MS));
   }
 }
 

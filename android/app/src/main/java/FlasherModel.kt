@@ -3,6 +3,7 @@ package com.oliver.m3cflasher
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.util.Base64
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -117,7 +118,7 @@ class FlasherModel private constructor(private val appContext: Context) {
     // ==================================================================
     private fun handleLine(line: String) {
         if (line.isEmpty()) return
-        if (!line.startsWith("SDDATA:")) addLog(line)
+        if (!line.startsWith("SDDATA:") && !line.startsWith("SDB:")) addLog(line)
 
         when {
             line.startsWith("INFO:VIN:") -> vin = line.substringAfter("INFO:VIN:")
@@ -389,13 +390,23 @@ class FlasherModel private constructor(private val appContext: Context) {
         progress = 0f
         val out = ByteArrayOutputStream()
         var size = 0L
-        send("SDGET:$name")
+        // Fast Base64 download - every piece carries its file offset, so a
+        // piece lost over Bluetooth is detected instead of corrupting the file.
+        send("SDGETB:$name")
         while (true) {
             val l = next(15_000)
             when {
                 l.startsWith("SDSIZE:") -> size = l.substringAfter("SDSIZE:").toLongOrNull() ?: 0
-                l.startsWith("SDDATA:") -> {
-                    out.write(hexToBytes(l.substringAfter("SDDATA:")))
+                l.startsWith("SDB:") -> {
+                    val rest = l.substring(4)
+                    val offset = rest.substringBefore(":").toLongOrNull()
+                    if (offset != out.size().toLong()) {
+                        setStatus("Download error: a piece was lost over Bluetooth - press Save again",
+                            error = true)
+                        drainUntil("SDGET_DONE")
+                        return@runOp
+                    }
+                    out.write(Base64.decode(rest.substringAfter(":"), Base64.NO_WRAP))
                     if (size > 0) progress = out.size().toFloat() / size
                 }
                 l == "SDGET_DONE" -> break
@@ -431,8 +442,8 @@ class FlasherModel private constructor(private val appContext: Context) {
         expectOk("STATUS:UPLOAD_READY")
         var pos = 0
         while (pos < data.size) {
-            val end = minOf(pos + 512, data.size)
-            send("WDATA:" + bytesToHex(data, pos, end))
+            val end = minOf(pos + 1024, data.size)
+            send("WB64:" + Base64.encodeToString(data, pos, end - pos, Base64.NO_WRAP))
             expectOk("STATUS:CHUNK_OK")
             pos = end
             progress = pos.toFloat() / data.size
@@ -444,6 +455,14 @@ class FlasherModel private constructor(private val appContext: Context) {
         setStatus("✅ Uploaded $name$note", error = note.isNotEmpty())
         listSd()
         selectedFile = name
+    }
+
+    /** Skips lines until [last] arrives (or nothing comes for a while). */
+    private suspend fun drainUntil(last: String) {
+        while (true) {
+            val l = nextOrNull(5_000) ?: return
+            if (l == last) return
+        }
     }
 
     private suspend fun expectOk(ok: String) {
@@ -476,27 +495,5 @@ class FlasherModel private constructor(private val appContext: Context) {
             delay(3000)
             ble.connect()
         }
-    }
-
-    // ==================================================================
-    // Hex helpers
-    // ==================================================================
-    private fun hexToBytes(s: String): ByteArray {
-        val n = s.length / 2
-        val out = ByteArray(n)
-        for (i in 0 until n) {
-            out[i] = ((Character.digit(s[i * 2], 16) shl 4) or Character.digit(s[i * 2 + 1], 16)).toByte()
-        }
-        return out
-    }
-
-    private fun bytesToHex(b: ByteArray, from: Int, to: Int): String {
-        val hex = "0123456789ABCDEF"
-        val sb = StringBuilder((to - from) * 2)
-        for (i in from until to) {
-            val v = b[i].toInt() and 0xFF
-            sb.append(hex[v shr 4]).append(hex[v and 0x0F])
-        }
-        return sb.toString()
     }
 }
