@@ -41,11 +41,9 @@ Bosch GmbH or any other trademark mentioned.
 ## Hardware
 
 - ESP32-S3 (or another ESP32 with a CAN transceiver)
-- CAN transceiver module connected to the ECU CAN-H/CAN-L lines (500 kbit/s).
-  The diagram uses a **TJA1050** module (5 V). Its RX output is 5 V, so it
-  goes to the ESP32 through a **1 kΩ / 2 kΩ voltage divider** (see below).
-  A 3.3 V transceiver (e.g. SN65HVD230) can be connected directly to 3V3
-  instead, without the divider.
+- CAN transceiver module connected to the ECU CAN-H/CAN-L lines (500 kbit/s),
+  e.g. a **TJA1050** module powered from 5 V (as in the diagram). A 3.3 V
+  transceiver such as the SN65HVD230 also works - power it from 3V3 instead.
 - SD card module (SPI)
 - 12 V power supply for the ECU (battery or bench PSU)
 - 5 V step-down (buck) module, e.g. MP1584EN mini module, to power the
@@ -55,6 +53,15 @@ Bosch GmbH or any other trademark mentioned.
 
 > Bluetooth needs an ESP32 with BLE (ESP32, ESP32-S3, ESP32-C3...). The
 > ESP32-S2 has no Bluetooth - use the WiFi web interface or USB there.
+
+### Parts used
+
+| | Part | Notes |
+|---|---|---|
+| <img src="docs/esp32.jpg" width="140"> | **ESP32-S3 DevKitC-1** (dual USB-C) | Main board (WiFi + Bluetooth LE). Connect USB to a PC for uploading the firmware and for the desktop GUI. |
+| <img src="docs/tja1050.jpg" width="140"> | **TJA1050 CAN module** | CAN transceiver, powered from 5 V. CANH/CANL go to ECU pins B1/C1. |
+| <img src="docs/mp1584en.jpg" width="140"> | **MP1584EN mini buck module** | 12 V → 5 V for the ESP32 and the TJA1050. Set the trimmer to 5.0 V before connecting. |
+| <img src="docs/sd_module.jpg" width="140"> | **microSD card breakout (SPI)** | Stores the read dumps and the files to write. Powered from 3V3. |
 
 ## Wiring
 
@@ -74,7 +81,7 @@ Bosch GmbH or any other trademark mentioned.
 | ESP32 | Connects to |
 |-------|-------------|
 | GPIO 4 (`CAN_TX`) | Transceiver TX |
-| GPIO 5 (`CAN_RX`) | Transceiver RX, through the 1 kΩ / 2 kΩ divider |
+| GPIO 5 (`CAN_RX`) | Transceiver RX |
 | GPIO 15 | SD card CS |
 | GPIO 18 | SD card SCK |
 | GPIO 17 | SD card MISO |
@@ -83,10 +90,9 @@ Bosch GmbH or any other trademark mentioned.
 | 5V / VIN | 5 V step-down OUT+ and transceiver VCC |
 | GND | 5 V step-down OUT−, transceiver GND |
 
-**RX voltage divider** (needed with the 5 V TJA1050): transceiver RX →
-1 kΩ → ESP32 GPIO 5, and GPIO 5 → 2 kΩ → GND. This brings the 5 V RX
-signal down to about 3.3 V; ESP32 pins are not 5 V tolerant. TX needs no
-divider - the TJA1050 accepts the ESP32's 3.3 V signal.
+> Note: a TJA1050 powered from 5 V outputs about 5 V on RX, slightly above
+> the ESP32's rated 3.6 V. It works in practice (tested), but for extra
+> safety you can add a 1 kΩ / 2 kΩ divider between RX and GPIO 5.
 
 **5 V step-down** (e.g. MP1584EN): IN+ → +12 V (same supply as ECU A4/B4),
 IN− → GND (ECU M4), OUT+ → ESP32 5V/VIN + transceiver VCC,
