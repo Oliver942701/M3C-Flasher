@@ -177,7 +177,17 @@ write), ESP32 reset and the wiring diagram.
 If Bluetooth drops during a write, the ESP32 finishes the write on its own -
 do not switch off the ignition; reconnect after a few minutes.
 
-**Building and installing** (no prebuilt APK yet):
+**Installing (easiest):** download the latest `M3C-Flasher-vX.X.apk` from
+the [Releases](../../releases) page on your phone and open it. Android asks
+to allow installing apps from this source - allow it and tap **Install**.
+(Samsung: if installation is blocked, turn off *Settings → Security and
+privacy → Auto Blocker*.) The app needs the **Nearby devices** permission to
+find the ESP32 over Bluetooth.
+
+The APK and the ESP32 firmware belong together - when a new release comes
+out, update both.
+
+**Building from source:**
 
 1. Install [Android Studio](https://developer.android.com/studio) and open
    the `android/` folder.

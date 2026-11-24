@@ -3,3 +3,11 @@
 __pycache__/
 *.pyc
 Claude outputs/
+
+# Android signing keys - never commit these
+*.jks
+*.keystore
+# Built app files (the APK goes to GitHub Releases instead)
+*.apk
+*.aab
+android/app/release/
