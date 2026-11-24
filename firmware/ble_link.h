@@ -43,10 +43,11 @@
 // Pause between notifications so the BLE stack's send queue never
 // overflows (otherwise notifications are silently dropped).
 // Normal output: 244 B every 8 ms. Bulk file download (bleBlocking):
-// 244 B every 4 ms, about 50 KB/s. The app checks every downloaded
-// piece by its offset, so a lost notification is always detected.
+// 244 B every 6 ms, about 40 KB/s. The app checks every downloaded
+// piece by its offset; if one is lost it asks again from that offset
+// (SDGETB:<name>:<offset>), so a lost notification never corrupts a file.
 #define BLE_NOTIFY_GAP_MS       8
-#define BLE_NOTIFY_GAP_BULK_MS  4
+#define BLE_NOTIFY_GAP_BULK_MS  6
 
 static BLEServer*         bleServer = nullptr;
 static BLECharacteristic* bleTx = nullptr;
@@ -55,6 +56,7 @@ static RingbufHandle_t    bleRxRing = nullptr;   // phone -> firmware commands
 static volatile bool      bleClientConnected = false;
 static volatile uint16_t  bleConnId = 0;
 static String             bleLineBuf = "";
+static size_t             bleRxEmptyFree = 0;     // free size of the empty RX ring
 
 // bleMute: while true, output is NOT sent to the phone (used for the
 //   long per-block "DATA:" lines during READ - the phone doesn't need
@@ -173,6 +175,7 @@ static void bleTxTask(void* arg) {
 void setupBLE() {
   bleTxRing = xRingbufferCreate(8192, RINGBUF_TYPE_BYTEBUF);
   bleRxRing = xRingbufferCreate(4096, RINGBUF_TYPE_BYTEBUF);
+  bleRxEmptyFree = xRingbufferGetCurFreeSize(bleRxRing);
 
   BLEDevice::init(BLE_DEVICE_NAME);
   BLEDevice::setMTU(247);
@@ -200,6 +203,17 @@ void setupBLE() {
   xTaskCreatePinnedToCore(bleTxTask, "bleTx", 4096, NULL, 1, NULL, 0);
 
   Out.println("STATUS:BLE_OK");
+}
+
+// ---------------------------------------------------------------------
+// True if the phone has sent something that is not processed yet, or
+// has disconnected. Long phone-only transfers use this to stop early
+// (the app sends "STOP" after a lost piece and then resumes).
+// ---------------------------------------------------------------------
+bool bleShouldAbort() {
+  if (!bleClientConnected) return true;
+  if (bleRxRing == nullptr) return false;
+  return xRingbufferGetCurFreeSize(bleRxRing) < bleRxEmptyFree;
 }
 
 // ---------------------------------------------------------------------

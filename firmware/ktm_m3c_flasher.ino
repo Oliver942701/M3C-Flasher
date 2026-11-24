@@ -1078,18 +1078,28 @@ int b64Decode(const String& s, uint8_t* out, int outMax) {
 // Fast download for the phone app: same as SDGET, but Base64 and every
 // line carries its file offset ("SDB:<offset>:<base64>") so the app can
 // detect a lost piece. Data lines go to Bluetooth only (not USB serial).
-void sendSDFileB64(String filename) {
+// "SDGETB:<name>:<offset>" resumes from <offset> after a lost piece.
+void sendSDFileB64(String arg) {
+  String filename = arg;
+  long offset = 0;
+  int sep = arg.lastIndexOf(':');
+  if (sep > 0) {               // FAT file names cannot contain ':'
+    filename = arg.substring(0, sep);
+    offset = strtol(arg.substring(sep + 1).c_str(), NULL, 10);
+  }
   if (!filename.startsWith("/")) filename = "/" + filename;
   File f = SD.open(filename, FILE_READ);
   if (!f) { Out.println("ERR:SD_FILE_NOT_FOUND"); return; }
   Out.print("SDSIZE:");
   Out.println(f.size());
+  if (offset < 0 || offset > (long)f.size()) offset = 0;
+  f.seek(offset);
   bleBlocking = true;
   serialMute = true;
   static uint8_t buf[360];
   static char enc[484];
-  long offset = 0;
   while (f.available()) {
+    if (bleShouldAbort()) break;   // phone asked to stop (lost piece) or left
     int n = f.read(buf, sizeof(buf));
     if (n <= 0) break;
     b64Encode(buf, n, enc);

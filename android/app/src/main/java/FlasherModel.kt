@@ -389,34 +389,48 @@ class FlasherModel private constructor(private val appContext: Context) {
         setStatus("Downloading $name...")
         progress = 0f
         val out = ByteArrayOutputStream()
-        var size = 0L
-        // Fast Base64 download - every piece carries its file offset, so a
-        // piece lost over Bluetooth is detected instead of corrupting the file.
-        send("SDGETB:$name")
+        var size = -1L
+        var resumes = 0
         while (true) {
-            val l = next(15_000)
-            when {
-                l.startsWith("SDSIZE:") -> size = l.substringAfter("SDSIZE:").toLongOrNull() ?: 0
-                l.startsWith("SDB:") -> {
-                    val rest = l.substring(4)
-                    val offset = rest.substringBefore(":").toLongOrNull()
-                    if (offset != out.size().toLong()) {
-                        setStatus("Download error: a piece was lost over Bluetooth - press Save again",
-                            error = true)
-                        drainUntil("SDGET_DONE")
+            // Fast Base64 download. Every piece carries its file offset; if a
+            // piece is lost over Bluetooth, the app says STOP and asks again
+            // from the first missing byte - nothing is ever saved corrupted.
+            send("SDGETB:$name:${out.size()}")
+            var lost = false
+            while (true) {
+                val l = next(15_000)
+                when {
+                    l.startsWith("SDSIZE:") -> size = l.substringAfter("SDSIZE:").toLongOrNull() ?: -1
+                    l.startsWith("SDB:") -> {
+                        if (lost) continue
+                        val rest = l.substring(4)
+                        val offset = rest.substringBefore(":").toLongOrNull()
+                        if (offset != out.size().toLong()) {
+                            lost = true
+                            send("STOP")
+                            continue
+                        }
+                        out.write(Base64.decode(rest.substringAfter(":"), Base64.NO_WRAP))
+                        if (size > 0) progress = out.size().toFloat() / size
+                    }
+                    l == "SDGET_DONE" -> break
+                    l.startsWith("ERR:") -> {
+                        setStatus("Download failed ($l)", error = true)
                         return@runOp
                     }
-                    out.write(Base64.decode(rest.substringAfter(":"), Base64.NO_WRAP))
-                    if (size > 0) progress = out.size().toFloat() / size
-                }
-                l == "SDGET_DONE" -> break
-                l.startsWith("ERR:") -> {
-                    setStatus("Download failed ($l)", error = true)
-                    return@runOp
                 }
             }
+            if (!lost && (size < 0 || out.size().toLong() >= size)) break
+            resumes++
+            if (resumes > 20) {
+                setStatus("Download failed: Bluetooth connection too unstable - move the phone closer and try again",
+                    error = true)
+                return@runOp
+            }
+            setStatus("Downloading $name... (resuming at ${out.size() / 1024} KB)")
+            delay(150)
         }
-        if (size > 0 && out.size().toLong() != size) {
+        if (size >= 0 && out.size().toLong() != size) {
             setStatus("Download incomplete: ${out.size()} of $size B - try again", error = true)
             return@runOp
         }
@@ -455,14 +469,6 @@ class FlasherModel private constructor(private val appContext: Context) {
         setStatus("✅ Uploaded $name$note", error = note.isNotEmpty())
         listSd()
         selectedFile = name
-    }
-
-    /** Skips lines until [last] arrives (or nothing comes for a while). */
-    private suspend fun drainUntil(last: String) {
-        while (true) {
-            val l = nextOrNull(5_000) ?: return
-            if (l == last) return
-        }
     }
 
     private suspend fun expectOk(ok: String) {
