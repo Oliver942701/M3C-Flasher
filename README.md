@@ -58,7 +58,7 @@ Bosch GmbH or any other trademark mentioned.
 
 | | Part | Notes |
 |---|---|---|
-| <img src="docs/esp32.jpg" width="140"> | **ESP32-S3 DevKitC-1** (dual USB-C) | Main board (WiFi + Bluetooth LE). Connect USB to a PC for uploading the firmware and for the desktop GUI. |
+| <img src="docs/esp32.jpg" width="140"> | **ESP32-S3 N16R8** (DevKitC-1 type, 16 MB flash, 8 MB PSRAM, dual USB-C) | Main board (WiFi + Bluetooth LE). Connect USB to a PC for uploading the firmware and for the desktop GUI. |
 | <img src="docs/tja1050.jpg" width="140"> | **TJA1050 CAN module** | CAN transceiver, powered from 5 V. CANH/CANL go to ECU pins B1/C1. |
 | <img src="docs/mp1584en.jpg" width="140"> | **MP1584EN mini buck module** | 12 V → 5 V for the ESP32 and the TJA1050. Set the trimmer to 5.0 V before connecting. |
 | <img src="docs/sd_module.jpg" width="140"> | **microSD card breakout (SPI)** | Stores the read dumps and the files to write. Powered from 3V3. |
@@ -145,9 +145,11 @@ read-back matches byte for byte.
 
 ## Usage
 
-1. Open the `firmware/` folder in the Arduino IDE, select the ESP32-S3 board,
-   set **Tools → Partition Scheme → Huge APP (3MB No OTA/1MB SPIFFS)**
-   (WiFi + Bluetooth do not fit into the default partition) and upload.
+1. Open the `firmware/` folder in the Arduino IDE and select
+   **Tools → Board → ESP32S3 Dev Module**. For the ESP32-S3 N16R8 also set
+   **Flash Size → 16MB** and **PSRAM → OPI PSRAM**. Set
+   **Partition Scheme → Huge APP (3MB No OTA/1MB SPIFFS)** (WiFi + Bluetooth
+   do not fit into the default partition) and upload.
 2. Use one of the three interfaces - they all talk to the same firmware:
    - **Desktop:** connect over USB and run `gui/ktm_m3c_flasher_gui.py`
      (`pip install pyserial`).
