@@ -163,8 +163,11 @@ function doConnect() {
 
 function doRead() {
   if (!connected) return;
+  let name = prompt('File name for the read (e.g. the owner\'s name).\n' +
+                    'Leave empty for flash_dump. ".bin" is added automatically.', '');
+  if (name === null) return;   // Cancel
   document.getElementById('status').innerText = 'Reading...';
-  fetch('/read').then(() => poll());
+  fetch('/read?name=' + encodeURIComponent(name.trim())).then(() => poll());
 }
 
 function doWrite() {
@@ -393,6 +396,7 @@ void handleConnect() {
 }
 
 void handleRead() {
+  readDumpName = webServer.hasArg("name") ? webServer.arg("name") : "";
   startWebTask("read");
   webServer.send(200, "text/plain", "OK");
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import tkinter as tk
-from tkinter import ttk, filedialog, scrolledtext, messagebox
+from tkinter import ttk, filedialog, scrolledtext, messagebox, simpledialog
 import serial
 import serial.tools.list_ports
 import threading
@@ -738,9 +738,19 @@ class FlasherGUI:
     def _do_read(self):
         if self.reading or self.op_busy:
             return
-        threading.Thread(target=self._read_thread, args=(False,), daemon=True).start()
+        # Ask for the dump file name (e.g. the bike owner's name), so reads
+        # of different ECUs are easy to tell apart on the SD card.
+        name = simpledialog.askstring(
+            'Read Flash',
+            'File name for the read (e.g. the owner\'s name).\n'
+            'Leave empty for flash_dump. ".bin" is added automatically.',
+            parent=self.root)
+        if name is None:  # Cancel
+            return
+        threading.Thread(target=self._read_thread, args=(False, name.strip()),
+                         daemon=True).start()
 
-    def _read_thread(self, no_handshake=False):
+    def _read_thread(self, no_handshake=False, name=''):
         self.reading = True
         self._set_busy(True)
         self.progress_var.set(0)
@@ -750,7 +760,8 @@ class FlasherGUI:
                    + (' (WITHOUT handshake - test)' if no_handshake else ''), 'info')
         self._log('Section 1: 0x7800-0x79FF | Section 2: 0x7E00-0x7FFF', 'info')
         self._log('Saves automatically to the SD card', 'info')
-        self._send('READ_NOHS' if no_handshake else 'READ')
+        cmd = 'READ_NOHS' if no_handshake else 'READ'
+        self._send(f'{cmd}:{name}' if name else cmd)
 
         done = 0
         errors = 0

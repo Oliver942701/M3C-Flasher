@@ -479,19 +479,38 @@ bool reauthForRead(unsigned long seedTimeoutMs = 20000) {
 
 // =====================================================================
 // Finds the next free filename to write to the SD card - NEVER
-// overwrites an existing file. flash_dump.bin, flash_dump_2.bin,
-// flash_dump_3.bin, etc.
+// overwrites an existing file. The base name comes from the READ
+// command ("READ:timo" -> timo.bin, timo_2.bin, ...); without a name it
+// is flash_dump.bin, flash_dump_2.bin, flash_dump_3.bin, etc.
 // =====================================================================
 
+// Base name for the next read dump, set by "READ:<name>". Empty = default.
+String readDumpName = "";
+
+String cleanDumpBaseName(String name) {
+  name.trim();
+  if (name.endsWith(".bin") || name.endsWith(".BIN")) name = name.substring(0, name.length() - 4);
+  String out = "";
+  for (size_t i = 0; i < name.length() && out.length() < 40; i++) {
+    char c = name[i];
+    if (isalnum((unsigned char)c) || c == '_' || c == '-' || c == '.') out += c;
+    else if (c == ' ') out += '_';
+  }
+  if (out.length() == 0) out = "flash_dump";
+  return out;
+}
+
 String nextDumpFilename() {
-  if (!SD.exists("/flash_dump.bin")) {
-    return "/flash_dump.bin";
+  String base = "/" + cleanDumpBaseName(readDumpName);
+  readDumpName = "";
+  if (!SD.exists(base + ".bin")) {
+    return base + ".bin";
   }
   int n = 2;
-  while (SD.exists("/flash_dump_" + String(n) + ".bin")) {
+  while (SD.exists(base + "_" + String(n) + ".bin")) {
     n++;
   }
-  return "/flash_dump_" + String(n) + ".bin";
+  return base + "_" + String(n) + ".bin";
 }
 
 void readFlash(bool skipHandshake = false) {
@@ -1208,7 +1227,9 @@ void handleSerialLine(String line) {
     connected = connectECU();
     if (!connected) Out.println("STATUS:CONNECT_FAILED");
   }
-  else if (line == "READ") {
+  else if (line == "READ" || line.startsWith("READ:")) {
+    // "READ:<name>" saves the dump as <name>.bin on the SD card
+    readDumpName = line.startsWith("READ:") ? line.substring(5) : "";
     if (!connected) { Out.println("ERR:NOT_CONNECTED"); return; }
     reading = true;
     readFlash();
@@ -1220,7 +1241,8 @@ void handleSerialLine(String line) {
   // hypothesis to needing more handshakes). The result of either
   // version (whether "ERR:NO_RESP" goes away or not) gives real
   // information without needing a CAN log.
-  else if (line == "READ_NOHS") {
+  else if (line == "READ_NOHS" || line.startsWith("READ_NOHS:")) {
+    readDumpName = line.startsWith("READ_NOHS:") ? line.substring(10) : "";
     if (!connected) { Out.println("ERR:NOT_CONNECTED"); return; }
     reading = true;
     readFlash(true);

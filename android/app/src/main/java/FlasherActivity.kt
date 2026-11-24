@@ -40,6 +40,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -118,6 +119,8 @@ fun FlasherScreen(m: FlasherModel) {
     var confirmReset by remember { mutableStateOf(false) }
     var showWiring by remember { mutableStateOf(false) }
     var showLog by remember { mutableStateOf(false) }
+    var askReadName by remember { mutableStateOf(false) }
+    var readName by remember { mutableStateOf("") }
     var downloadName by remember { mutableStateOf("") }
 
     // --- Bluetooth on + permissions, then connect ---
@@ -235,7 +238,7 @@ fun FlasherScreen(m: FlasherModel) {
             }
             Spacer(Modifier.height(6.dp))
             OutlinedButton(
-                onClick = { m.readFlash() },
+                onClick = { readName = ""; askReadName = true },
                 enabled = canAct && m.ecuConnected,
                 modifier = Modifier.fillMaxWidth()
             ) { Text("READ FLASH (save to SD card)") }
@@ -334,6 +337,32 @@ fun FlasherScreen(m: FlasherModel) {
                 }
             },
             dismissButton = { TextButton(onClick = { confirmWrite = null }) { Text("Cancel") } }
+        )
+    }
+    if (askReadName) {
+        AlertDialog(
+            onDismissRequest = { askReadName = false },
+            title = { Text("Read flash") },
+            text = {
+                Column {
+                    Text("File name for the read, e.g. the owner's name. " +
+                        "Leave empty for flash_dump. \".bin\" is added automatically.")
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = readName,
+                        onValueChange = { readName = it.take(40) },
+                        singleLine = true,
+                        placeholder = { Text("flash_dump") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { askReadName = false; m.readFlash(readName) }) {
+                    Text("READ", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = { TextButton(onClick = { askReadName = false }) { Text("Cancel") } }
         )
     }
     confirmDelete?.let { name ->

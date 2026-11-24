@@ -267,17 +267,22 @@ class FlasherModel private constructor(private val appContext: Context) {
         else -> "ECU connect failed (${l.substringAfter(":")})"
     }
 
-    fun readFlash() = runOp {
+    /** Reads the ECU flash to the SD card as <name>.bin (empty name = flash_dump). */
+    fun readFlash(name: String = "") = runOp {
         setStatus("Reading flash...")
         progress = 0f
-        send("READ")
+        var savedAs = ""
+        send(if (name.isBlank()) "READ" else "READ:${name.trim()}")
         while (true) {
             val l = next(60_000)
+            if (l.startsWith("STEP:SD_DUMP_START:")) savedAs = l.substringAfter("STEP:SD_DUMP_START:").trimStart('/')
             if (l.startsWith("STATUS:READ_DONE:")) {
                 // STATUS:READ_DONE:<done>:ERR:<errors>
                 val errors = l.substringAfterLast(":").toIntOrNull() ?: 0
-                if (errors == 0) setStatus("Read complete - saved to the SD card")
-                else setStatus("Read finished with $errors failed blocks (filled with FF)", error = true)
+                val file = if (savedAs.isNotEmpty()) savedAs else "the SD card"
+                if (errors == 0) setStatus("✅ Read complete - saved as $file")
+                else setStatus("Read finished with $errors failed blocks (filled with FF) - $file", error = true)
+                if (savedAs.isNotEmpty()) selectedFile = savedAs
                 break
             }
             if (l == "ERR:NOT_CONNECTED") {
