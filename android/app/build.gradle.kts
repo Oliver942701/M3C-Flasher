@@ -21,9 +21,12 @@ android {
 
     buildTypes {
         release {
+            // R8 optimization is turned off: with the default package-scoped
+            // optimization the release APK crashed on start
+            // (IllegalAccessError in androidx.startup). The app is small,
+            // so the unoptimized APK is fine.
             optimization {
-                enable = true
-                packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
+                enable = false
             }
         }
     }
