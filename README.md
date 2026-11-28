@@ -18,8 +18,8 @@ not from documentation (no official documentation is publicly available).
 > - Always do a **READ** first and store the original file safely before
 >   any write.
 > - Do not interrupt power during a write.
-> - The diagnostic (DTC/Live Data) commands are **best guesses**, not
->   confirmed from a CAN log (see below).
+> - Flashing and diagnostics are **locked against each other** - see
+>   [Diagnostics](#diagnostics).
 
 This project is not affiliated with or endorsed by KTM AG, Continental AG,
 Bosch GmbH or any other trademark mentioned.
@@ -113,10 +113,10 @@ firmware/
   blocks.h              - Calibration blocks written to the ECU during Connect
   checksum.h            - Built-in CRC-16/MODBUS checksum check and correction
   ble_link.h            - Bluetooth LE link (Nordic UART Service) for the Android app
-  diagnostics.h         - DTC/Live Data (BEST GUESS, unconfirmed - see warning in file)
+  diagnostics.h         - Diagnostics mode: live data, fault codes, ECU info + flash/diagnostics lock
   webui.h               - WiFi/phone web interface (Connect/Read/Write/SD files)
 gui/
-  ktm_m3c_flasher_gui.py - Desktop Python/Tkinter GUI (over USB Serial)
+  ktm_m3c_flasher_gui.py - Desktop Python/Tkinter GUI (over USB Serial), FLASHER + DIAGNOSTICS mode
 tools/
   m3c_checksum_gui.py    - Standalone checksum checker/fixer (Python/Tkinter)
 android/                 - Android app (Kotlin/Jetpack Compose, Bluetooth LE)
@@ -156,11 +156,46 @@ read-back matches byte for byte.
    - **Android app:** see [Android app](#android-app) below.
    - **Web:** connect your phone to the WiFi network `M3C_Flasher`
      (password `flasher123`) and open `192.168.4.1` in a browser.
-3. The desktop GUI loads the SD card file list as soon as it starts - you can
+3. The desktop GUI has the same two modes as the app - switch with
+   **FLASHER / DIAGNOSTICS** at the top (the safety lock applies here too).
+   It loads the SD card file list as soon as it starts - you can
    upload, download and delete SD files without connecting to the ECU.
 4. Press CONNECT, then READ FLASH before attempting any write.
 5. **RESET ESP32** (desktop GUI and web page) restarts the ESP32 if anything
    gets stuck. After a reset, press CONNECT again.
+
+## Diagnostics
+
+Firmware 2.0 adds a diagnostics mode to the same ESP32 firmware (tested on a
+2020 Husqvarna TE 300i). It never does security access and never writes the
+flash.
+
+- **Live data:** engine speed, throttle and coolant temperature from the
+  frames the ECU broadcasts itself (`0x6B1` / `0x6B3`), plus standard OBD-II
+  mode 01 PIDs on `0x7E0`/`0x7E8`: engine load, intake air temperature and
+  pressure, ignition advance, fuel trims, barometric pressure, run time,
+  check-engine light and number of stored codes.
+- **Fault codes:** read (KWP2000 / OBD-II / UDS requests are tried one after
+  another) and clear (OBD-II mode 04). The app shows an English description
+  and the most likely blink code for each code.
+- **ECU info:** VIN, calibration ID, software version, programming date.
+
+**Safety lock - flashing and diagnostics never run at the same time.** Extra
+traffic on the bus during a read or write could corrupt the transfer and
+brick the ECU, so the firmware enforces:
+
+- After **CONNECT** (and during READ / WRITE) every diagnostics command is
+  refused with `ERR:LOCKED:FLASH` and no diagnostic frame is sent.
+- While live data runs (or a diagnostic request is in progress), CONNECT,
+  READ and WRITE are refused with `ERR:LOCKED:DIAG`.
+- `ECU_RELEASE` ends a finished flash session so diagnostics can be used
+  again (refused while a read or write runs). After a write, switch the
+  ignition off and on before using diagnostics.
+- Live data stops automatically when the phone disconnects.
+
+Serial / BLE commands: `MODE`, `ECU_RELEASE`, `DIAG_LIVE:1` / `DIAG_LIVE:0`,
+`INFO`, `DTC_READ`, `DTC_CLEAR:OBD` (or `KWP` / `UDS`). See the header of
+`firmware/diagnostics.h` for the answer formats.
 
 ## Android app
 
@@ -169,10 +204,18 @@ connects to the ESP32 over **Bluetooth LE**. The ESP32 advertises as
 `M3C_Flasher` using the Nordic UART Service, and the app uses the same text
 protocol as the desktop GUI.
 
-Features: ECU CONNECT (VIN, calibration, date, version), READ FLASH to the SD
-card, SD card file list, upload from / save to the phone, delete,
-**WRITE TO ECU** with status and progress bar (checksum check → erase →
-write), ESP32 reset and the wiring diagram.
+The start screen has two modes:
+
+- **Flasher:** ECU CONNECT (VIN, calibration, date, version), READ FLASH to
+  the SD card, SD card file list, upload from / save to the phone, delete,
+  **WRITE TO ECU** with status and progress bar (checksum check → erase →
+  write).
+- **Diagnostics** (firmware 2.0+): live data, fault codes with descriptions
+  and a searchable code list, ECU info.
+
+The buttons of the locked mode are greyed out (see the safety lock under
+[Diagnostics](#diagnostics)); leaving the diagnostics screen stops live data.
+ESP32 reset, the log and the wiring diagram are on the start screen.
 
 If Bluetooth drops during a write, the ESP32 finishes the write on its own -
 do not switch off the ignition; reconnect after a few minutes.

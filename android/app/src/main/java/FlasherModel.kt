@@ -21,6 +21,36 @@ import java.io.ByteArrayOutputStream
 
 data class SdFile(val name: String, val size: Long)
 
+/** One live data sample (LIVE: line). null = not received from the ECU yet. */
+data class LiveData(
+    val rpm: Float? = null,
+    val throttle: Float? = null,
+    val coolant: Float? = null,
+    val faultBits: Int? = null,
+    val load: Float? = null,
+    val intakeTemp: Float? = null,
+    val intakePressure: Float? = null,
+    val advance: Float? = null,
+    val stft: Float? = null,
+    val ltft: Float? = null,
+    val baro: Float? = null,
+    val runTime: Float? = null,
+    val mil: Boolean? = null,
+    val dtcCount: Int? = null,
+)
+
+/** One fault code, merged from all the read methods that reported it. */
+data class DtcEntry(
+    val code: String,
+    val description: String,
+    val blink: String,
+    /** "STORED" or "PENDING" (pending = only reported by OBD mode 07). */
+    val state: String,
+)
+
+/** What kind of operation is running - used for the flash/diagnostics lock. */
+enum class OpKind { NONE, FLASH, DIAG, SD }
+
 /**
  * All app state and the logic of each operation. Talks to the ESP32 with
  * the same text protocol as the desktop GUI (see ktm_m3c_flasher.ino,
@@ -40,6 +70,11 @@ class FlasherModel private constructor(private val appContext: Context) {
 
         const val EXPECTED_BIN_SIZE = 262144L
         private const val MAX_LOG = 300
+        private const val RPM_HISTORY = 60
+
+        /** Bits of the 0x6B3 fault byte. 0x90 is the normal value. */
+        private const val FAULT_NORMAL_MASK = 0x90
+        private const val FAULT_IGNORE_MASK = 0x01
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -67,6 +102,32 @@ class FlasherModel private constructor(private val appContext: Context) {
 
     val log = mutableStateListOf<String>()
 
+    /** What runs right now (only meaningful while [busy]). */
+    var opKind by mutableStateOf(OpKind.NONE); private set
+    /** ESP32 firmware version from the PING answer ("" = old firmware). */
+    var fwVersion by mutableStateOf(""); private set
+    /** Diagnostics needs firmware 2.0 or newer. */
+    val diagSupported: Boolean
+        get() = (fwVersion.substringBefore('.').toIntOrNull() ?: 0) >= 2
+
+    // ---------------- diagnostics state ----------------
+    var liveOn by mutableStateOf(false); private set
+    var live by mutableStateOf(LiveData()); private set
+    /** True when live data is on but the ECU sends nothing (ignition off). */
+    var ecuSilent by mutableStateOf(false); private set
+    val rpmHistory = mutableStateListOf<Float>()
+    val dtcs = mutableStateListOf<DtcEntry>()
+    var dtcStatus by mutableStateOf("Press READ CODES"); private set
+
+    /**
+     * SAFETY LOCK (the ESP32 enforces the same rules, this only greys out
+     * the buttons): flashing and diagnostics never run at the same time.
+     * Diagnostic traffic on the bus during a read/write could corrupt the
+     * transfer and brick the ECU.
+     */
+    val flashLocked: Boolean get() = liveOn || (busy && opKind == OpKind.DIAG)
+    val diagLocked: Boolean get() = ecuConnected || (busy && opKind == OpKind.FLASH)
+
     // ---------------- internals ----------------
     private val opMutex = Mutex()
     /** Lines are copied here while an operation waits for replies. */
@@ -80,6 +141,7 @@ class FlasherModel private constructor(private val appContext: Context) {
                 bleState = s
                 when (s) {
                     BleLink.State.READY -> {
+                        liveOn = false
                         setStatus("ESP32 connected")
                         syncAfterConnect()
                     }
@@ -100,6 +162,8 @@ class FlasherModel private constructor(private val appContext: Context) {
                             setStatus(ble.lastError.value, error = true)
                         }
                         ecuConnected = false
+                        liveOn = false
+                        fwVersion = ""
                         opLines?.close()
                     }
                     BleLink.State.SCANNING -> setStatus("Searching for ESP32...")
@@ -118,9 +182,25 @@ class FlasherModel private constructor(private val appContext: Context) {
     // ==================================================================
     private fun handleLine(line: String) {
         if (line.isEmpty()) return
-        if (!line.startsWith("SDDATA:") && !line.startsWith("SDB:")) addLog(line)
+        if (!line.startsWith("SDDATA:") && !line.startsWith("SDB:") && !line.startsWith("LIVE:")) addLog(line)
 
         when {
+            line.startsWith("LIVE:") -> handleLive(line)
+            line.startsWith("VERSION:") -> fwVersion = line.substringAfter("VERSION:").trim()
+            line == "STATUS:LIVE_ON" -> liveOn = true
+            line == "STATUS:LIVE_OFF" -> { liveOn = false; ecuSilent = false }
+            line == "STATUS:ECU_RELEASED" -> {
+                ecuConnected = false
+                setStatus("Flash session ended - diagnostics can be used")
+            }
+            line == "ERR:LOCKED:FLASH" -> setStatus(
+                "Diagnostics is locked: the ECU is in flash mode. Finish the flash work and end the flash session first.",
+                error = true
+            )
+            line == "ERR:LOCKED:DIAG" -> setStatus(
+                "Flasher is locked: diagnostics is running. Stop live data first.",
+                error = true
+            )
             line.startsWith("INFO:VIN:") -> vin = line.substringAfter("INFO:VIN:")
             line.startsWith("INFO:CAL:") -> cal = line.substringAfter("INFO:CAL:")
             line.startsWith("INFO:DATE:") -> date = line.substringAfter("INFO:DATE:")
@@ -161,6 +241,40 @@ class FlasherModel private constructor(private val appContext: Context) {
         else -> null
     }
 
+    private fun handleLive(line: String) {
+        if (line == "LIVE:NONE") {
+            ecuSilent = true
+            return
+        }
+        ecuSilent = false
+        val kv = line.substringAfter("LIVE:").split(';').associate {
+            it.substringBefore('=') to it.substringAfter('=', "?")
+        }
+        fun f(k: String) = kv[k]?.toFloatOrNull()
+        val d = LiveData(
+            rpm = f("RPM"), throttle = f("THR"), coolant = f("CLT"),
+            faultBits = kv["FLT"]?.toIntOrNull(16),
+            load = f("LOAD"), intakeTemp = f("IAT"), intakePressure = f("MAP"),
+            advance = f("ADV"), stft = f("STFT"), ltft = f("LTFT"), baro = f("BARO"),
+            runTime = f("RUN"), mil = f("MIL")?.let { it >= 1f }, dtcCount = f("DTCN")?.toInt(),
+        )
+        live = d
+        d.rpm?.let {
+            rpmHistory.add(it)
+            while (rpmHistory.size > RPM_HISTORY) rpmHistory.removeAt(0)
+        }
+    }
+
+    /** Faults the ECU reports as present right now (live 0x6B3 bits). */
+    fun activeFaults(): List<String> {
+        val b = live.faultBits ?: return emptyList()
+        val extra = b and FAULT_NORMAL_MASK.inv() and FAULT_IGNORE_MASK.inv()
+        val out = mutableListOf<String>()
+        if ((extra and 0x06) != 0) out.add("Ambient air pressure / temperature sensor")
+        for (bit in listOf(3, 5, 6)) if ((extra and (1 shl bit)) != 0) out.add("Unknown fault (bit $bit)")
+        return out
+    }
+
     private fun addLog(line: String) {
         log.add(line)
         while (log.size > MAX_LOG) log.removeAt(0)
@@ -179,10 +293,21 @@ class FlasherModel private constructor(private val appContext: Context) {
      * Runs one operation at a time. While it runs, every received line is
      * also delivered to the operation through [next].
      */
-    private fun runOp(block: suspend () -> Unit) {
+    private fun runOp(kind: OpKind = OpKind.SD, block: suspend () -> Unit) {
         if (busy || bleState != BleLink.State.READY) return
+        // Safety lock, checked here too so a flash op never starts while
+        // diagnostics runs and the other way round.
+        if (kind == OpKind.FLASH && flashLocked) {
+            setStatus("Flasher is locked: diagnostics is running. Stop live data first.", error = true)
+            return
+        }
+        if (kind == OpKind.DIAG && diagLocked) {
+            setStatus("Diagnostics is locked: the ECU is in flash mode.", error = true)
+            return
+        }
         scope.launch {
             if (!opMutex.tryLock()) return@launch
+            opKind = kind
             busy = true
             progress = null
             val ch = Channel<String>(Channel.UNLIMITED)
@@ -197,6 +322,7 @@ class FlasherModel private constructor(private val appContext: Context) {
                 opLines = null
                 ch.close()
                 busy = false
+                opKind = OpKind.NONE
                 writing = false
                 progress = null
                 opMutex.unlock()
@@ -232,6 +358,8 @@ class FlasherModel private constructor(private val appContext: Context) {
     private fun syncAfterConnect() {
         scope.launch {
             delay(300)
+            ble.sendLine("PING")          // answer includes VERSION:x.y
+            delay(300)
             ble.sendLine("STATUS")
             delay(300)
             refreshSd()
@@ -241,7 +369,7 @@ class FlasherModel private constructor(private val appContext: Context) {
     // ==================================================================
     // ECU
     // ==================================================================
-    fun connectEcu() = runOp {
+    fun connectEcu() = runOp(OpKind.FLASH) {
         vin = ""; cal = ""; date = ""; ver = ""
         setStatus("Connecting to ECU...")
         send("CONNECT")
@@ -254,6 +382,7 @@ class FlasherModel private constructor(private val appContext: Context) {
                 return@runOp
             }
             if (l == "STATUS:CONNECT_FAILED") break
+            if (l == "ERR:LOCKED:DIAG") return@runOp
             if (l.startsWith("ERR:") && err == null) err = l
         }
         setStatus(connectError(err ?: "ERR:CONNECT_FAILED"), error = true)
@@ -268,7 +397,7 @@ class FlasherModel private constructor(private val appContext: Context) {
     }
 
     /** Reads the ECU flash to the SD card as <name>.bin (empty name = flash_dump). */
-    fun readFlash(name: String = "") = runOp {
+    fun readFlash(name: String = "") = runOp(OpKind.FLASH) {
         setStatus("Reading flash...")
         progress = 0f
         var savedAs = ""
@@ -289,12 +418,13 @@ class FlasherModel private constructor(private val appContext: Context) {
                 setStatus("Connect to the ECU first", error = true)
                 return@runOp
             }
+            if (l == "ERR:LOCKED:DIAG") return@runOp
         }
         listSd()
     }
 
     /** Writes the selected SD file to the ECU. */
-    fun writeEcu(fileName: String) = runOp {
+    fun writeEcu(fileName: String) = runOp(OpKind.FLASH) {
         writing = true
         setStatus("Checking file...")
         progress = 0f
@@ -313,6 +443,10 @@ class FlasherModel private constructor(private val appContext: Context) {
                 (l.startsWith("ERR:WRITEFULL_") || l.startsWith("ERR:WB_")) && !failed -> {
                     setStatus(writeError(l), error = true)
                     failed = true
+                }
+                l == "ERR:LOCKED:DIAG" -> {
+                    writing = false
+                    return@runOp
                 }
                 l == "STATUS:WRITEFULL_FAILED" -> {
                     if (!failed) setStatus("❌ Write failed", error = true)
@@ -489,6 +623,103 @@ class FlasherModel private constructor(private val appContext: Context) {
             ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
 
     // ==================================================================
+    // Diagnostics
+    // ==================================================================
+    fun startLive() {
+        if (bleState != BleLink.State.READY || diagLocked || !diagSupported) return
+        rpmHistory.clear()
+        scope.launch { ble.sendLine("DIAG_LIVE:1") }
+    }
+
+    fun stopLive() {
+        if (bleState != BleLink.State.READY) { liveOn = false; return }
+        scope.launch { ble.sendLine("DIAG_LIVE:0") }
+    }
+
+    /**
+     * Ends a finished flash session on the ESP32 so diagnostics can be
+     * used. The ESP32 refuses it while a read or write is running.
+     */
+    fun endFlashSession() {
+        if (busy || bleState != BleLink.State.READY) return
+        scope.launch { ble.sendLine("ECU_RELEASE") }
+    }
+
+    fun readEcuInfo() = runOp(OpKind.DIAG) {
+        setStatus("Reading ECU info...")
+        send("INFO")
+        var noAnswer = false
+        while (true) {
+            val l = next(15_000)
+            if (l == "ERR:LOCKED:FLASH") return@runOp
+            if (l == "ERR:ECU_NO_RESPONSE") noAnswer = true
+            if (l == "INFO_DONE") break
+        }
+        if (noAnswer) setStatus("ECU not answering - ignition on? Cable connected?", error = true)
+        else setStatus("ECU info read")
+    }
+
+    fun readDtcs() = runOp(OpKind.DIAG) { readDtcsInner() }
+
+    private suspend fun readDtcsInner() {
+        setStatus("Reading fault codes...")
+        dtcStatus = "Reading..."
+        send("DTC_READ")
+        // code -> set of methods that reported it
+        val found = linkedMapOf<String, MutableSet<String>>()
+        var anyAnswer = false
+        while (true) {
+            val l = next(15_000)
+            when {
+                l == "ERR:LOCKED:FLASH" -> { dtcStatus = "Locked - ECU is in flash mode"; return }
+                // DTC:<method>:<raw hex>:<P-code>:<status>
+                l.startsWith("DTC:") -> {
+                    val p = l.split(':')
+                    val method = p.getOrNull(1) ?: ""
+                    val code = p.getOrNull(3) ?: continue
+                    found.getOrPut(code) { mutableSetOf() }.add(method)
+                }
+                l.startsWith("DTCCOUNT:") -> if (!l.endsWith(":?")) anyAnswer = true
+                l == "DTC_READ_DONE" -> break
+            }
+        }
+        dtcs.clear()
+        found.forEach { (code, methods) ->
+            val info = DtcCodes.describe(code)
+            val pending = methods.all { it == "OBD_07" }
+            dtcs.add(DtcEntry(code, info.description, info.blink, if (pending) "PENDING" else "STORED"))
+        }
+        dtcStatus = when {
+            !anyAnswer && dtcs.isEmpty() -> "ECU did not answer - ignition on?"
+            dtcs.isEmpty() -> "No fault codes stored"
+            else -> "${dtcs.size} fault code" + (if (dtcs.size == 1) "" else "s") + " found"
+        }
+        setStatus(dtcStatus, error = !anyAnswer && dtcs.isEmpty())
+    }
+
+    /** Clears the stored fault codes (OBD-II mode 04), then reads them again. */
+    fun clearDtcs() = runOp(OpKind.DIAG) {
+        setStatus("Clearing fault codes...")
+        send("DTC_CLEAR:OBD")
+        while (true) {
+            val l = next(15_000)
+            if (l == "ERR:LOCKED:FLASH") return@runOp
+            if (l.startsWith("CLEAR:OBD:")) {
+                val r = l.substringAfter("CLEAR:OBD:")
+                if (r != "OK") {
+                    setStatus("Clear failed ($r)", error = true)
+                    return@runOp
+                }
+                break
+            }
+        }
+        delay(500)
+        readDtcsInner()
+        if (dtcs.isEmpty()) setStatus("✅ Fault codes cleared")
+        else setStatus("Codes cleared, but ${dtcs.size} came back - the fault is still present", error = true)
+    }
+
+    // ==================================================================
     // ESP32 reset
     // ==================================================================
     fun resetEsp() {
@@ -497,6 +728,7 @@ class FlasherModel private constructor(private val appContext: Context) {
             setStatus("Restarting ESP32...")
             ble.sendLine("RESET")
             ecuConnected = false
+            liveOn = false
             vin = ""; cal = ""; date = ""; ver = ""
             // The ESP32 drops the Bluetooth link when it restarts - reconnect.
             withTimeoutOrNull(5000) {

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Monochrome version of the app icon (themed icons): outlines only.
+     Kept inside the 66dp safe zone of the 108dp adaptive icon. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="1.12"
+        android:scaleY="1.12">
+        <!-- chip body -->
+        <path
+            android:strokeColor="#FF6A13"
+            android:strokeWidth="4"
+            android:pathData="M39,34 H69 A5,5 0 0 1 74,39 V69 A5,5 0 0 1 69,74 H39 A5,5 0 0 1 34,69 V39 A5,5 0 0 1 39,34 Z" />
+        <!-- pins -->
+        <path
+            android:strokeColor="#FF6A13"
+            android:strokeWidth="3.5"
+            android:strokeLineCap="round"
+            android:pathData="M44,27 V34 M54,27 V34 M64,27 V34 M44,74 V81 M54,74 V81 M64,74 V81 M27,44 H34 M27,54 H34 M27,64 H34 M74,44 H81 M74,54 H81 M74,64 H81" />
+        <!-- live data line -->
+        <path
+            android:strokeColor="#4EC9B0"
+            android:strokeWidth="3.5"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M39,56 H45 L49,46 L55,64 L59,52 H69" />
+    </group>
+</vector>

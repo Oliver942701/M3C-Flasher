@@ -16,6 +16,9 @@
 // Used to validate the WRITEFULL file size before writing.
 #define EXPECTED_BIN_SIZE 262144UL
 
+// 2.0 = flasher + diagnostics mode in one firmware
+#define FW_VERSION "2.0"
+
 CanFrame rxFrame;
 String serialBuf = "";
 bool connected = false;
@@ -1223,13 +1226,20 @@ void handleSerialLine(String line) {
   line.trim();
   if (line.length() == 0) return;
 
+  // Diagnostics commands and the flash/diagnostics safety lock
+  // (see diagnostics.h)
+  if (handleDiagCommand(line)) return;
+
   if (line == "CONNECT") {
+    if (!flashAllowed()) return;
     connected = connectECU();
     if (!connected) Out.println("STATUS:CONNECT_FAILED");
+    printMode();
   }
   else if (line == "READ" || line.startsWith("READ:")) {
     // "READ:<name>" saves the dump as <name>.bin on the SD card
     readDumpName = line.startsWith("READ:") ? line.substring(5) : "";
+    if (!flashAllowed()) return;
     if (!connected) { Out.println("ERR:NOT_CONNECTED"); return; }
     reading = true;
     readFlash();
@@ -1243,6 +1253,7 @@ void handleSerialLine(String line) {
   // information without needing a CAN log.
   else if (line == "READ_NOHS" || line.startsWith("READ_NOHS:")) {
     readDumpName = line.startsWith("READ_NOHS:") ? line.substring(10) : "";
+    if (!flashAllowed()) return;
     if (!connected) { Out.println("ERR:NOT_CONNECTED"); return; }
     reading = true;
     readFlash(true);
@@ -1282,6 +1293,7 @@ void handleSerialLine(String line) {
     handleUploadDone();
   }
   else if (line.startsWith("WRITEFULL:")) {
+    if (!flashAllowed()) return;
     String fname = line.substring(10);
     if (!fname.startsWith("/")) fname = "/" + fname;
     writeFullFlash(fname.c_str());
@@ -1310,15 +1322,6 @@ void handleSerialLine(String line) {
     if (count == 0) Out.println("STATUS:BUS_SILENT");
     else { Out.print("STATUS:BUS_NOT_SILENT:"); Out.println(count); }
   }
-  else if (line == "DTC_READ") {
-    readDTCs();
-  }
-  else if (line == "DTC_CLEAR") {
-    clearDTCs();
-  }
-  else if (line == "LIVE_READ") {
-    readLiveData();
-  }
   // Software restart of the ESP32 (same as pressing the EN/RST button).
   // The desktop GUI's Reset button normally resets the board through the
   // USB-serial RTS line instead, which works even if the firmware is stuck
@@ -1326,8 +1329,14 @@ void handleSerialLine(String line) {
   else if (line == "RESET") {
     doEspRestart();
   }
-  else if (line == "PING") Out.println("PONG");
-  else if (line == "STATUS") Out.println(connected ? "STATUS:CONNECTED" : "STATUS:DISCONNECTED");
+  else if (line == "PING") {
+    Out.println("PONG");
+    Out.println("VERSION:" FW_VERSION);
+  }
+  else if (line == "STATUS") {
+    Out.println(connected ? "STATUS:CONNECTED" : "STATUS:DISCONNECTED");
+    printMode();
+  }
 }
 
 void setup() {
@@ -1355,6 +1364,7 @@ void setup() {
   setupWebUI();
   setupBLE();
 
+  Out.println("VERSION:" FW_VERSION);
   Out.println("STATUS:READY");
 }
 
@@ -1370,5 +1380,6 @@ void loop() {
   }
   bleRxPoll(handleSerialLine);
   loopWebUI();
+  diagLoop();
   yield();
 }

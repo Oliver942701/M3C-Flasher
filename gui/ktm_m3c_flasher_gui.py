@@ -153,6 +153,114 @@ WIRING_ESP32 = [
 ]
 
 
+# =====================================================================
+# Fault code descriptions (same list as the Android app). The blink code
+# is the most likely match from the owner's manual fault table - not
+# confirmed by KTM for every code. "1L 2S" = 1 long + 2 short flashes.
+# =====================================================================
+DTC_DESCRIPTIONS = {
+    'P0335': ('Crankshaft position sensor - circuit fault / no signal', '02 (2S)'),
+    'P0336': ('Crankshaft position sensor - signal implausible / irregular', '02 (2S)'),
+    'P0337': ('Crankshaft position sensor - signal too low', '02 (2S)'),
+    'P0338': ('Crankshaft position sensor - signal too high', '02 (2S)'),
+    'P0339': ('Crankshaft position sensor - signal intermittent', '02 (2S)'),
+    'P0016': ('Crankshaft position - correlation / synchronization faulty', '02 (2S)'),
+    'P0120': ('Throttle position sensor A - circuit fault', '06 (6S)'),
+    'P0121': ('Throttle position sensor A - range/performance (adaption failed)', '06 (6S)'),
+    'P0122': ('Throttle position sensor A - input signal too low', '06 (6S)'),
+    'P0123': ('Throttle position sensor A - input signal too high', '06 (6S)'),
+    'P0638': ('Throttle actuator control - range/performance', '06 (6S)'),
+    'P0105': ('Crankcase / manifold pressure sensor - circuit fault', '09 (9S)'),
+    'P0106': ('Crankcase / manifold pressure sensor - range/performance, difference to ECU value too high', '14 (1L 4S)'),
+    'P0107': ('Crankcase / manifold pressure sensor - short circuit to ground (low)', '09 (9S)'),
+    'P0108': ('Crankcase / manifold pressure sensor - open / short circuit to plus (high)', '09 (9S)'),
+    'P0101': ('Air flow / air mass calculation - range/performance', ''),
+    'P0102': ('Air flow / air mass calculation - input too low', ''),
+    'P0103': ('Air flow / air mass calculation - input too high', ''),
+    'P2227': ('Ambient air pressure sensor - range/performance', '09 (9S)'),
+    'P2228': ('Ambient air pressure sensor - short circuit to ground (low)', '09 (9S)'),
+    'P2229': ('Ambient air pressure sensor - open / short circuit to plus (high)', '09 (9S)'),
+    'P2230': ('Ambient air pressure sensor - signal intermittent', '09 (9S)'),
+    'P0069': ('Manifold pressure vs. ambient pressure - correlation', ''),
+    'P0070': ('Ambient air temperature sensor - circuit fault', ''),
+    'P0071': ('Ambient air temperature sensor - range/performance', ''),
+    'P0072': ('Ambient air temperature sensor - input signal too low', ''),
+    'P0073': ('Ambient air temperature sensor - input signal too high', ''),
+    'P0110': ('Intake air temperature sensor - circuit fault', '13 (1L 3S)'),
+    'P0111': ('Intake air temperature sensor - range/performance', '13 (1L 3S)'),
+    'P0112': ('Intake air temperature sensor - input signal too low', '13 (1L 3S)'),
+    'P0113': ('Intake air temperature sensor - input signal too high', '13 (1L 3S)'),
+    'P0115': ('Coolant temperature sensor - circuit fault', '12 (1L 2S)'),
+    'P0116': ('Coolant temperature sensor - range/performance', '12 (1L 2S)'),
+    'P0117': ('Coolant temperature sensor - input signal too low', '12 (1L 2S)'),
+    'P0118': ('Coolant temperature sensor - input signal too high', '12 (1L 2S)'),
+    'P0125': ('Coolant temperature too low for closed loop control', ''),
+    'P0217': ('Engine overtemperature', ''),
+    'P0560': ('System (battery) voltage - circuit fault', '21 (2L 1S)'),
+    'P0562': ('Battery voltage - input voltage too low', '21 (2L 1S)'),
+    'P0563': ('Battery voltage - input voltage too high', '21 (2L 1S)'),
+    'P0200': ('Injector circuit - fault', ''),
+    'P0201': ('Injection valve 0, cylinder 1 (low load injector) - circuit fault', '33 (3L 3S)'),
+    'P0261': ('Injection valve 0, cylinder 1 - input signal too low', '33 (3L 3S)'),
+    'P0262': ('Injection valve 0, cylinder 1 - input signal too high', '33 (3L 3S)'),
+    'P0202': ('Injector 2 circuit - likely injection valve 1 (top feed injector)', '34 (3L 4S)'),
+    'P0264': ('Injector 2 circuit low - likely injection valve 1 (top feed injector)', '34 (3L 4S)'),
+    'P0265': ('Injector 2 circuit high - likely injection valve 1 (top feed injector)', '34 (3L 4S)'),
+    'P0351': ('Ignition coil - circuit fault', '37 (3L 7S)'),
+    'P2300': ('Ignition coil - primary circuit low', '37 (3L 7S)'),
+    'P2301': ('Ignition coil - primary circuit high', '37 (3L 7S)'),
+    'P0230': ('Fuel pump - primary circuit fault', '41 (4L 1S)'),
+    'P0231': ('Fuel pump - short circuit to ground / open circuit (low)', '41 (4L 1S)'),
+    'P0232': ('Fuel pump - open circuit / short circuit to plus (high)', '41 (4L 1S)'),
+    'P0627': ('Fuel pump control - circuit open', '41 (4L 1S)'),
+    'P0628': ('Fuel pump control - circuit low', '41 (4L 1S)'),
+    'P0629': ('Fuel pump control - circuit high', '41 (4L 1S)'),
+    'P206C': ('Oil pump circuit (reported on KTM group 2-strokes)', '42 (4L 2S)'),
+    'P260C': ('Oil pump circuit (reported on KTM group 2-strokes)', '42 (4L 2S)'),
+    'P0505': ('Idle air control system - fault', ''),
+    'P0506': ('Idle speed lower than expected', ''),
+    'P0507': ('Idle speed higher than expected', ''),
+    'P0500': ('Vehicle speed sensor - fault', ''),
+    'P0600': ('ECU communication (serial link) - fault', ''),
+    'P0601': ('ECU internal memory checksum error', ''),
+    'P0603': ('ECU internal keep-alive memory error', ''),
+    'P0604': ('ECU internal RAM error', ''),
+    'P0605': ('ECU internal ROM error', ''),
+    'P0606': ('ECU processor fault', ''),
+    'P0650': ('Malfunction indicator lamp (MIL) - circuit fault', ''),
+    'U0001': ('CAN bus communication - fault', ''),
+    'U0100': ('Lost communication with engine control unit', ''),
+}
+
+DTC_GROUPS = [
+    ('P00', 'Fuel / air metering and auxiliary emission controls'),
+    ('P01', 'Fuel / air metering'),
+    ('P02', 'Fuel / air metering (injector circuit)'),
+    ('P03', 'Ignition system or misfire'),
+    ('P04', 'Auxiliary emission controls'),
+    ('P05', 'Vehicle speed, idle control and auxiliary inputs'),
+    ('P06', 'ECU and auxiliary outputs'),
+    ('P07', 'Transmission'),
+    ('P1', 'Manufacturer specific (KTM / Continental)'),
+    ('P2', 'Fuel / air metering, auxiliary controls'),
+    ('P3', 'Manufacturer specific / reserved'),
+    ('U', 'Network / CAN communication'),
+    ('C', 'Chassis'),
+    ('B', 'Body'),
+]
+
+
+def describe_dtc(code):
+    """Returns (description, blink code) for a code like 'P0118'."""
+    code = (code or '').upper().strip()
+    if code in DTC_DESCRIPTIONS:
+        return DTC_DESCRIPTIONS[code]
+    for prefix, text in DTC_GROUPS:
+        if code.startswith(prefix):
+            return (f'Unknown code - group: {text}', '')
+    return ('Unknown code', '')
+
+
 def addr_to_bin_offset(addr):
     if 0x7800 <= addr <= 0x79FF:
         return (addr - 0x7800) * 256
@@ -164,7 +272,7 @@ def addr_to_bin_offset(addr):
 class FlasherGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("KTM M3C Flasher")
+        self.root.title("KTM M3C Flasher + Diagnostics")
         self.root.geometry("1280x760")
         self.root.minsize(1100, 560)
         self.root.configure(bg='#1e1e1e')
@@ -179,16 +287,23 @@ class FlasherGUI:
         # an operation that was interrupted by a reset does not keep
         # waiting for answers that will never come.
         self.reset_gen = 0
+        # Diagnostics mode (firmware 2.0+). Flashing and diagnostics never
+        # run at the same time - the ESP32 enforces it too (see
+        # firmware/diagnostics.h), the GUI only greys out the buttons.
+        self.mode = 'flasher'
+        self.fw_version = ''
+        self.live_on = False
+        self.live_thread = None
         self._build()
-        self._auto_detect()
-        # CHANGE: load the SD card contents immediately on startup - the SD
-        # card lives on the ESP32, so listing/uploading/deleting files does
-        # not need an ECU connection (only WRITE TO ECU does).
-        if self.port_var.get():
-            self.root.after(300, self._sd_refresh)
-        else:
-            self.sd_status.config(text='ESP32 not found - pick the port and press Refresh')
+        self.root.protocol('WM_DELETE_WINDOW', self._on_close)
         self.port_combo.bind('<<ComboboxSelected>>', self._on_port_changed)
+        # Look for the ESP32 in a background thread so the window opens
+        # immediately - some COM ports (e.g. Bluetooth serial ports on a
+        # laptop) can block for a long time when opened.
+        self.port_combo['values'] = [p.device for p in
+                                     serial.tools.list_ports.comports()]
+        self.sd_status.config(text='Looking for the ESP32...')
+        threading.Thread(target=self._auto_detect, daemon=True).start()
 
     def _build(self):
         style = ttk.Style()
@@ -226,13 +341,20 @@ class FlasherGUI:
                                    state='disabled')
         self.btn_read.pack(side='left', padx=(0, 6))
 
-        self.btn_diag = tk.Button(top, text='DIAGNOSTICS',
-                                   command=self._open_diagnostics,
-                                   state='normal',
-                                   bg='#6b3fa0', fg='white',
-                                   font=('Segoe UI', 10, 'bold'),
-                                   relief='flat', padx=12, pady=6)
-        self.btn_diag.pack(side='left', padx=(0, 6))
+        # Mode switch: FLASHER (SD card + write) / DIAGNOSTICS (live data,
+        # fault codes). Shown on the right-hand panel.
+        mode_frame = tk.Frame(top, bg='#1e1e1e', padx=3, pady=3)
+        mode_frame.pack(side='right', padx=(12, 0))   # far right of the bar
+        self.btn_mode_flash = tk.Button(mode_frame, text='FLASHER',
+                                         command=lambda: self._set_mode('flasher'),
+                                         font=('Segoe UI', 9, 'bold'), relief='flat',
+                                         padx=12, pady=3, cursor='hand2')
+        self.btn_mode_flash.pack(side='left')
+        self.btn_mode_diag = tk.Button(mode_frame, text='DIAGNOSTICS',
+                                        command=lambda: self._set_mode('diag'),
+                                        font=('Segoe UI', 9, 'bold'), relief='flat',
+                                        padx=12, pady=3, cursor='hand2')
+        self.btn_mode_diag.pack(side='left')
 
         # Always enabled - also meant for getting out of a stuck operation.
         self.btn_reset = tk.Button(top, text='RESET ESP32',
@@ -305,7 +427,12 @@ class FlasherGUI:
         right.pack_propagate(False)
 
         self._build_log_panel(left)
-        self._build_sd_panel(right)
+        self.sd_frame = tk.Frame(right, bg='#1e1e1e')
+        self.diag_frame = tk.Frame(right, bg='#1e1e1e')
+        self._build_sd_panel(self.sd_frame)
+        self._build_diag_panel(self.diag_frame)
+        self.sd_frame.pack(fill='both', expand=True)
+        self._show_mode_buttons()
 
     def _build_log_panel(self, parent):
         tk.Label(parent, text='Log:', bg='#1e1e1e', fg='#888888',
@@ -403,9 +530,11 @@ class FlasherGUI:
                        bg=on_bg if enabled else off_bg,
                        fg=on_fg if enabled else off_fg)
 
-        cfg(self.btn_connect, idle and not self.connected, '#0078d4')
-        cfg(self.btn_read, idle and self.connected, '#107c10')
-        cfg(self.btn_diag, idle, '#6b3fa0')
+        # Safety lock: no CONNECT / READ / WRITE while live data runs, no
+        # diagnostics while the ECU is in flash mode (CONNECT done).
+        flash_ok = idle and not self.live_on
+        cfg(self.btn_connect, flash_ok and not self.connected, '#0078d4')
+        cfg(self.btn_read, flash_ok and self.connected, '#107c10')
         # CHANGE: SD card buttons only need the ESP32 (serial port open +
         # SD card present), NOT an ECU connection. Refresh is always
         # available so the list can be (re)loaded at any time. Only
@@ -415,7 +544,8 @@ class FlasherGUI:
         cfg(self.btn_sd_download, idle and esp and bool(self.sd_files), '#107c10')
         cfg(self.btn_sd_delete, idle and esp and bool(self.sd_files), '#c84b2f')
         cfg(self.btn_sd_upload, idle and esp and self.sd_ready, '#0078d4')
-        cfg(self.btn_sd_write, idle and self.connected and bool(self.sd_files), '#c84b2f')
+        cfg(self.btn_sd_write, flash_ok and self.connected and bool(self.sd_files), '#c84b2f')
+        self._update_diag_buttons()
 
     def _esp_ready(self):
         return bool(self.ser and self.ser.is_open)
@@ -442,20 +572,38 @@ class FlasherGUI:
             self.port_combo.set(ports[0])
 
     def _auto_detect(self):
-        for p in serial.tools.list_ports.comports():
+        # Probe USB serial ports only (ESP32 boards show up as USB devices);
+        # Bluetooth / virtual COM ports are skipped because opening them can
+        # hang for a long time.
+        ports = [p for p in serial.tools.list_ports.comports()
+                 if p.vid is not None]
+        found = None
+        for p in ports:
             try:
-                s = serial.Serial(p.device, BAUD, timeout=0.3)
+                s = serial.Serial(p.device, BAUD, timeout=0.3,
+                                  write_timeout=0.5)
                 time.sleep(0.1)
                 s.write(b'PING\n')
                 time.sleep(0.2)
                 resp = s.read(64).decode('utf-8', errors='ignore')
                 s.close()
                 if any(x in resp for x in ['PONG', 'CAN_OK', 'READY']):
-                    self.port_var.set(p.device)
-                    self._log(f'✅ ESP32 found: {p.device}', 'ok')
-                    return
+                    found = p.device
+                    break
             except Exception:
                 pass
+        self.root.after(0, lambda: self._auto_detect_done(found))
+
+    def _auto_detect_done(self, port):
+        if port:
+            self.port_var.set(port)
+            self._log(f'✅ ESP32 found: {port}', 'ok')
+            # Load the SD card contents right away - the SD card lives on
+            # the ESP32, so it does not need an ECU connection.
+            self.root.after(300, self._sd_refresh)
+        else:
+            self.sd_status.config(
+                text='ESP32 not found - pick the port and press Refresh')
 
     def _log(self, msg, tag='info'):
         self.log_text.configure(state='normal')
@@ -506,6 +654,11 @@ class FlasherGUI:
                 self.sd_ready = False
                 self._log('⚠ SD card not found', 'err')
             if line == 'PONG':
+                # Firmware 2.0+ answers VERSION:x.y right after PONG
+                nxt = self._read_line(timeout=0.4)
+                if nxt and nxt.startswith('VERSION:'):
+                    self.fw_version = nxt[len('VERSION:'):].strip()
+                    self.root.after(0, self._update_diag_buttons)
                 time.sleep(0.1)
                 self.ser.reset_input_buffer()
                 return True
@@ -598,6 +751,9 @@ class FlasherGUI:
                 val = line[len('INFO:VER:'):]
                 self.ver_var.set(val)
                 self._log(f'Software version: {val}', 'ok')
+            elif line == 'ERR:LOCKED:DIAG':
+                self._log('🔒 Flasher locked - diagnostics is running. Stop live data first.', 'err')
+                break
             elif line.startswith('ERR:'):
                 self._log(line, 'err')
             elif line == 'STATUS:SD_OK':
@@ -1294,146 +1450,561 @@ class FlasherGUI:
                  bg='#1e1e1e', fg='#f0a500', font=('Consolas', 9),
                  justify='left', wraplength=700).pack(anchor='w', padx=12, pady=(12, 12))
 
-    def _open_diagnostics(self):
-        if self.op_busy:
+    # =================================================================
+    # MODE SWITCH (FLASHER / DIAGNOSTICS)
+    # =================================================================
+    def _show_mode_buttons(self):
+        diag = self.mode == 'diag'
+        self.btn_mode_flash.config(bg='#3c3c3c' if diag else '#ff6a13',
+                                   fg='white' if diag else '#1e1e1e')
+        self.btn_mode_diag.config(bg='#4ec9b0' if diag else '#3c3c3c',
+                                  fg='#1e1e1e' if diag else 'white')
+
+    def _set_mode(self, mode):
+        if mode == self.mode:
             return
-        if not self.ser or not self.ser.is_open:
-            if not self._open_serial():
-                return
+        if mode == 'flasher' and self.live_on:
+            # Leaving diagnostics always stops live data, so the flasher
+            # is free again.
+            threading.Thread(target=self._live_stop_sync, daemon=True).start()
+        self.mode = mode
+        if mode == 'diag':
+            self.sd_frame.pack_forget()
+            self.diag_frame.pack(fill='both', expand=True)
+        else:
+            self.diag_frame.pack_forget()
+            self.sd_frame.pack(fill='both', expand=True)
+        self._show_mode_buttons()
+        self._update_diag_buttons()
 
-        win = tk.Toplevel(self.root)
-        win.title('Diagnostics')
-        win.geometry('520x480')
-        win.configure(bg='#1e1e1e')
+    # =================================================================
+    # DIAGNOSTICS PANEL
+    #
+    # Uses the diagnostics commands of firmware 2.0 (see
+    # firmware/diagnostics.h): DIAG_LIVE:1/0, INFO, DTC_READ,
+    # DTC_CLEAR:OBD, ECU_RELEASE. Read-only except CLEAR CODES.
+    # =================================================================
+    LIVE_TILES = [
+        ('THR', 'Throttle', '%'), ('CLT', 'Coolant', '°C'), ('LOAD', 'Engine load', '%'),
+        ('ADV', 'Ignition adv.', '°'), ('IAT', 'Intake air', '°C'), ('MAP', 'Intake press.', 'kPa'),
+        ('STFT', 'Short fuel trim', '%'), ('LTFT', 'Long fuel trim', '%'), ('BARO', 'Baro press.', 'kPa'),
+    ]
 
-        tk.Label(win, text='⚠ These commands have not yet been confirmed '
-                            'from a Flex CAN log - best guess, may not work',
-                 bg='#1e1e1e', fg='#f0a500', font=('Consolas', 9),
-                 wraplength=490, justify='left').pack(anchor='w', padx=10, pady=(10, 6))
+    def _build_diag_panel(self, parent):
+        bg = '#1e1e1e'
+        card = '#252526'
+        style = ttk.Style()
+        style.configure('Diag.Treeview', background='#0d0d0d', fieldbackground='#0d0d0d',
+                        foreground='#d4d4d4', rowheight=22, font=('Consolas', 9))
+        style.configure('Diag.Treeview.Heading', background='#2d2d2d', foreground='#cccccc',
+                        font=('Segoe UI', 9, 'bold'))
+        style.map('Diag.Treeview', background=[('selected', '#0078d4')])
 
-        dtc_frame = tk.LabelFrame(win, text='Diagnostic Trouble Codes (DTC)', bg='#1e1e1e',
-                                   fg='#cccccc', font=('Consolas', 9))
-        dtc_frame.pack(fill='both', expand=True, padx=10, pady=6)
+        head = tk.Frame(parent, bg=bg)
+        head.pack(fill='x')
+        tk.Label(head, text='DIAGNOSTICS', bg=bg, fg='#4ec9b0',
+                 font=('Segoe UI', 10, 'bold')).pack(side='left')
+        self.btn_end_session = tk.Button(head, text='END FLASH SESSION',
+                                         command=self._end_flash_session,
+                                         bg='#555555', fg='#888888', relief='flat',
+                                         font=('Segoe UI', 8, 'bold'), padx=6,
+                                         state='disabled')
+        self.btn_end_session.pack(side='right')
+        self.diag_lock_label = tk.Label(parent, text='', bg=bg, fg='#f0a500',
+                                        font=('Consolas', 9), wraplength=500,
+                                        justify='left')
+        self.diag_lock_label.pack(anchor='w', pady=(2, 4))
 
-        dtc_list = tk.Listbox(dtc_frame, bg='#0d0d0d', fg='#d4d4d4',
-                               font=('Consolas', 10), height=8,
-                               selectbackground='#0078d4')
-        dtc_list.pack(fill='both', expand=True, padx=6, pady=6)
+        # ---- live data ----
+        live = tk.Frame(parent, bg=card, padx=10, pady=8)
+        live.pack(fill='x')
+        top = tk.Frame(live, bg=card)
+        top.pack(fill='x')
+        self.live_rpm_var = tk.StringVar(value='–')
+        tk.Label(top, textvariable=self.live_rpm_var, bg=card, fg='white',
+                 font=('Consolas', 26, 'bold')).pack(side='left')
+        tk.Label(top, text=' rpm', bg=card, fg='#888888',
+                 font=('Consolas', 11)).pack(side='left', anchor='s', pady=(0, 6))
+        self.live_state_label = tk.Label(top, text='stopped', bg=card, fg='#888888',
+                                         font=('Consolas', 9))
+        self.live_state_label.pack(side='right')
 
-        dtc_status = tk.Label(dtc_frame, text='', bg='#1e1e1e',
-                               fg='#888888', font=('Consolas', 9))
-        dtc_status.pack(anchor='w', padx=6)
+        grid = tk.Frame(live, bg=card)
+        grid.pack(fill='x', pady=(4, 0))
+        self.live_vars = {}
+        for n, (key, label, unit) in enumerate(self.LIVE_TILES):
+            cell = tk.Frame(grid, bg=card)
+            cell.grid(row=n // 3, column=n % 3, sticky='w', padx=(0, 18), pady=2)
+            tk.Label(cell, text=label, bg=card, fg='#888888',
+                     font=('Consolas', 8)).pack(anchor='w')
+            var = tk.StringVar(value='–')
+            self.live_vars[key] = (var, unit)
+            tk.Label(cell, textvariable=var, bg=card, fg='#4ec9b0',
+                     font=('Consolas', 12, 'bold')).pack(anchor='w')
+        self.live_mil_label = tk.Label(live, text='Check-engine light (MIL): –   Run time: –',
+                                       bg=card, fg='#cccccc', font=('Consolas', 9))
+        self.live_mil_label.pack(anchor='w', pady=(4, 2))
+        self.live_faults_label = tk.Label(live, text='', bg=card, fg='#f44747',
+                                          font=('Consolas', 9), wraplength=480,
+                                          justify='left')
+        self.live_faults_label.pack(anchor='w')
+        self.btn_live = tk.Button(live, text='START LIVE DATA', command=self._live_toggle,
+                                  bg='#4ec9b0', fg='#1e1e1e', relief='flat',
+                                  font=('Segoe UI', 9, 'bold'), pady=4)
+        self.btn_live.pack(fill='x', pady=(6, 0))
 
-        def read_dtcs():
-            dtc_list.delete(0, 'end')
-            dtc_status.config(text='Reading trouble codes...')
-            win.update_idletasks()
-            self._send('DTC_READ')
-            count = 0
-            deadline = time.time() + 5
+        # ---- fault codes ----
+        tk.Label(parent, text='Fault codes', bg=bg, fg='#cccccc',
+                 font=('Segoe UI', 9, 'bold')).pack(anchor='w', pady=(10, 2))
+        tree_frame = tk.Frame(parent, bg=bg)
+        tree_frame.pack(fill='x')
+        self.dtc_tree = ttk.Treeview(tree_frame, style='Diag.Treeview', height=5,
+                                     columns=('code', 'desc', 'blink', 'state'),
+                                     show='headings')
+        for col, text, width in (('code', 'Code', 62), ('desc', 'Description', 285),
+                                 ('blink', 'Blink', 80), ('state', 'Status', 70)):
+            self.dtc_tree.heading(col, text=text, anchor='w')
+            self.dtc_tree.column(col, width=width, anchor='w', stretch=(col == 'desc'))
+        self.dtc_tree.pack(side='left', fill='x', expand=True)
+        sb = ttk.Scrollbar(tree_frame, orient='vertical', command=self.dtc_tree.yview)
+        sb.pack(side='right', fill='y')
+        self.dtc_tree.configure(yscrollcommand=sb.set)
+        self.dtc_status = tk.Label(parent, text='Press READ CODES', bg=bg, fg='#888888',
+                                   font=('Consolas', 9), wraplength=500, justify='left')
+        self.dtc_status.pack(anchor='w', pady=(2, 4))
+
+        btns = tk.Frame(parent, bg=bg)
+        btns.pack(fill='x')
+        self.btn_dtc_read = tk.Button(btns, text='READ CODES', command=self._diag_read_codes,
+                                      bg='#4ec9b0', fg='#1e1e1e', relief='flat',
+                                      font=('Segoe UI', 9, 'bold'), padx=10, pady=3)
+        self.btn_dtc_read.pack(side='left')
+        self.btn_dtc_clear = tk.Button(btns, text='CLEAR CODES', command=self._diag_clear_codes,
+                                       bg='#c84b2f', fg='white', relief='flat',
+                                       font=('Segoe UI', 9, 'bold'), padx=10, pady=3)
+        self.btn_dtc_clear.pack(side='left', padx=6)
+        tk.Button(btns, text='Code list...', command=self._open_code_list,
+                  bg='#3c3c3c', fg='white', relief='flat', padx=10,
+                  pady=3).pack(side='left')
+        # ECU info goes into the VIN / calibration bar at the top
+        self.btn_info = tk.Button(btns, text='READ ECU INFO', command=self._diag_read_info,
+                                  bg='#4ec9b0', fg='#1e1e1e', relief='flat',
+                                  font=('Segoe UI', 9, 'bold'), padx=10, pady=3)
+        self.btn_info.pack(side='right')
+
+        # Clicking a code shows its full description (the column is narrow)
+        def on_select(_event=None):
+            sel = self.dtc_tree.selection()
+            if sel:
+                code, desc, blink, state = self.dtc_tree.item(sel[0], 'values')
+                self.dtc_status.config(
+                    text=f'{code}: {desc}' + (f' - blink code {blink}' if blink else '')
+                         + f' ({state})', fg='#cccccc')
+        self.dtc_tree.bind('<<TreeviewSelect>>', on_select)
+
+    def _update_diag_buttons(self):
+        if not hasattr(self, 'btn_live'):
+            return
+        idle = not self.op_busy
+
+        def cfg(btn, enabled, on_bg, on_fg='white'):
+            btn.config(state='normal' if enabled else 'disabled',
+                       bg=on_bg if enabled else '#555555',
+                       fg=on_fg if enabled else '#888888')
+
+        diag_ok = idle and not self.connected
+        cfg(self.btn_live, self.live_on or diag_ok,
+            '#c84b2f' if self.live_on else '#4ec9b0',
+            'white' if self.live_on else '#1e1e1e')
+        self.btn_live.config(text='STOP LIVE DATA' if self.live_on else 'START LIVE DATA')
+        cfg(self.btn_dtc_read, diag_ok, '#4ec9b0', '#1e1e1e')
+        cfg(self.btn_dtc_clear, diag_ok, '#c84b2f')
+        cfg(self.btn_info, diag_ok, '#4ec9b0', '#1e1e1e')
+        cfg(self.btn_end_session, idle and self.connected, '#8a6d00')
+
+        if self.connected:
+            text = ('🔒 Diagnostics locked: the ECU is in flash mode (CONNECT was done). '
+                    'This protects a read/write from being disturbed. When the flash work '
+                    'is finished press END FLASH SESSION (after a write: ignition off and '
+                    'on first).')
+        elif self.live_on:
+            text = '🔒 CONNECT / READ / WRITE are locked while live data runs.'
+        elif self._esp_ready() and not self.fw_version:
+            text = ('⚠ The ESP32 firmware has no diagnostics - upload ktm_m3c_flasher '
+                    'version 2.0 or newer.')
+        else:
+            text = ''
+        self.diag_lock_label.config(text=text)
+
+    def _check_diag_firmware(self):
+        """Worker thread: True if the ESP32 runs firmware 2.0+ (diagnostics)."""
+        if not self.fw_version:
+            self._send('PING')
+            deadline = time.time() + 1.5
             while time.time() < deadline:
-                line = self._read_line(timeout=1.0)
-                if line is None:
-                    continue
-                if line.startswith('DTC_READ_DONE'):
+                line = self._read_line(timeout=0.3)
+                if line and line.startswith('VERSION:'):
+                    self.fw_version = line[len('VERSION:'):].strip()
                     break
-                if line.startswith('DTC:'):
-                    dtc_list.insert('end', line[4:])
-                    count += 1
-                elif line.startswith('ERR:'):
-                    dtc_status.config(text=line)
-                    return
-            dtc_status.config(text=f'{count} trouble codes found' if count
-                               else 'No trouble codes found (or the command does not work)')
+        try:
+            major = int(self.fw_version.split('.')[0])
+        except ValueError:
+            major = 0
+        if major < 2:
+            self._log('⚠ This ESP32 firmware has no diagnostics - upload ktm_m3c_flasher '
+                      'version 2.0 or newer.', 'err')
+            self.root.after(0, self._update_diag_buttons)
+            return False
+        return True
 
-        def clear_dtcs():
-            def confirm():
-                return messagebox.askyesno('Clear trouble codes',
-                                            'Clear all trouble codes from the ECU?')
-            if not self._ask_on_main(confirm):
+    def _diag_op(self, fn):
+        """Runs one diagnostics operation in a worker thread. Live data is
+        paused meanwhile (only one thread may read the serial port) and
+        started again afterwards."""
+        if self.op_busy or self.connected:
+            return
+
+        def worker():
+            was_live = self.live_on
+            if was_live:
+                self._live_stop_sync()
+            self._set_busy(True)
+            try:
+                if self._ensure_serial() and self._check_diag_firmware():
+                    fn()
+            except Exception as e:
+                self._log(f'ERR: {e}', 'err')
+            finally:
+                self._set_busy(False)
+            if was_live and not self.connected:
+                self._live_start_worker()
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _read_until(self, done_prefix, on_line, idle_timeout=15.0):
+        """Reads lines until one starts with done_prefix. Returns False on
+        timeout or when the ESP32 refuses because of the flash lock."""
+        gen = self.reset_gen
+        while gen == self.reset_gen:
+            line = self._read_line(timeout=idle_timeout)
+            if line is None:
+                self._log('ERR: Timeout - no answer from the ESP32', 'err')
+                return False
+            if line == 'ERR:LOCKED:FLASH':
+                self._log('🔒 Diagnostics locked - the ECU is in flash mode.', 'err')
+                return False
+            on_line(line)
+            if line.startswith(done_prefix):
+                return True
+        return False
+
+    # ---------------- live data ----------------
+    def _live_toggle(self):
+        if self.live_on:
+            threading.Thread(target=self._live_stop_sync, daemon=True).start()
+        else:
+            if self.op_busy or self.connected:
                 return
-            dtc_status.config(text='Clearing...')
-            win.update_idletasks()
-            self._send('DTC_CLEAR')
+            threading.Thread(target=self._live_start_worker, daemon=True).start()
+
+    def _live_start_worker(self):
+        self._set_busy(True)
+        ok = False
+        try:
+            if not (self._ensure_serial() and self._check_diag_firmware()):
+                return
+            self._send('DIAG_LIVE:1')
             deadline = time.time() + 3
             while time.time() < deadline:
-                line = self._read_line(timeout=1.0)
+                line = self._read_line(timeout=0.5)
                 if line is None:
                     continue
-                if line == 'STATUS:DTC_CLEARED':
-                    dtc_status.config(text='✅ Trouble codes cleared')
-                    dtc_list.delete(0, 'end')
+                if line == 'STATUS:LIVE_ON':
+                    ok = True
+                    break
+                if line == 'ERR:LOCKED:FLASH':
+                    self._log('🔒 Diagnostics locked - the ECU is in flash mode.', 'err')
+                    break
+            if not ok:
+                self._log('ERR: live data did not start', 'err')
+        finally:
+            if ok:
+                self.live_on = True
+                self._log('Live data started', 'ok')
+            self._set_busy(False)
+        if ok:
+            self.live_thread = threading.Thread(target=self._live_reader, daemon=True)
+            self.live_thread.start()
+
+    def _live_reader(self):
+        gen = self.reset_gen
+        while self.live_on and gen == self.reset_gen:
+            line = self._read_line(timeout=0.5)
+            if not line:
+                continue
+            if line.startswith('LIVE:'):
+                self.root.after(0, self._apply_live, line)
+            elif line == 'STATUS:LIVE_OFF':
+                break
+            elif line.startswith('ERR:'):
+                self._log(line, 'err')
+        if gen != self.reset_gen:
+            self.live_on = False
+            self.root.after(0, self._live_stopped_ui)
+
+    def _live_stop_sync(self):
+        """Stops live data and waits until the reader thread has ended
+        (call from a worker thread)."""
+        if not self.live_on:
+            return
+        self.live_on = False
+        self._send('DIAG_LIVE:0')
+        if self.live_thread and self.live_thread is not threading.current_thread():
+            self.live_thread.join(timeout=2)
+        deadline = time.time() + 1.0
+        while time.time() < deadline:
+            line = self._read_line(timeout=0.3)
+            if line is None or line == 'STATUS:LIVE_OFF':
+                break
+        self._log('Live data stopped', 'info')
+        self.root.after(0, self._live_stopped_ui)
+
+    def _live_stopped_ui(self):
+        self.live_state_label.config(text='stopped', fg='#888888')
+        # Old values must not look like live ones
+        self.live_rpm_var.set('–')
+        for var, _unit in self.live_vars.values():
+            var.set('–')
+        self.live_mil_label.config(text='Check-engine light (MIL): –   Run time: –', fg='#cccccc')
+        self.live_faults_label.config(text='')
+        self._set_busy(self.op_busy)
+
+    def _apply_live(self, line):
+        if line == 'LIVE:NONE':
+            self.live_state_label.config(text='ECU silent - ignition on?', fg='#f0a500')
+            return
+        self.live_state_label.config(text='● live', fg='#4ec9b0')
+        kv = {}
+        for part in line[len('LIVE:'):].split(';'):
+            if '=' in part:
+                k, v = part.split('=', 1)
+                kv[k] = v
+
+        def num(key):
+            try:
+                return float(kv.get(key, '?'))
+            except ValueError:
+                return None
+
+        rpm = num('RPM')
+        self.live_rpm_var.set('–' if rpm is None else f'{rpm:.0f}')
+        for key, (var, unit) in self.live_vars.items():
+            v = num(key)
+            if v is None:
+                var.set('–')
+            else:
+                dec = 1 if key in ('ADV', 'STFT', 'LTFT') else 0
+                var.set(f'{v:.{dec}f} {unit}')
+        mil = num('MIL')
+        dtcn = num('DTCN')
+        run = num('RUN')
+        mil_txt = '–' if mil is None else ('ON' if mil >= 1 else 'OFF')
+        if mil is not None and mil >= 1 and dtcn is not None:
+            mil_txt += f' ({dtcn:.0f} code(s) stored)'
+        run_txt = '–' if run is None else f'{int(run) // 60}:{int(run) % 60:02d} min'
+        self.live_mil_label.config(text=f'Check-engine light (MIL): {mil_txt}   Run time: {run_txt}',
+                                   fg='#f44747' if mil and mil >= 1 else '#cccccc')
+        # Faults present right now, from the broadcast fault byte (0x6B3).
+        # 0x90 is the normal value, bit 0 comes and goes - not a fault.
+        faults = []
+        try:
+            b = int(kv.get('FLT', '?'), 16)
+            extra = b & ~0x90 & ~0x01
+            if extra & 0x06:
+                faults.append('Ambient air pressure / temperature sensor')
+            for bit in (3, 5, 6):
+                if extra & (1 << bit):
+                    faults.append(f'Unknown fault (bit {bit})')
+        except ValueError:
+            pass
+        self.live_faults_label.config(
+            text=('Active now: ' + ', '.join(faults)) if faults else '')
+
+    # ---------------- fault codes ----------------
+    def _diag_read_codes(self):
+        self._diag_op(self._read_codes_worker)
+
+    def _read_codes_worker(self):
+        self.root.after(0, lambda: self.dtc_status.config(text='Reading fault codes...', fg='#888888'))
+        self._log('\n---------- Read fault codes ----------', 'info')
+        self._send('DTC_READ')
+        found = {}          # code -> set of methods
+        answered = [False]
+
+        def on_line(line):
+            if line.startswith('DTC:'):
+                p = line.split(':')
+                if len(p) >= 4:
+                    found.setdefault(p[3], set()).add(p[1])
+                self._log(line, 'ok')
+            elif line.startswith('DTCCOUNT:'):
+                if not line.endswith(':?'):
+                    answered[0] = True
+                self._log(line, 'data')
+            elif line.startswith('DIAG:'):
+                self._log(line, 'data')
+            elif line.startswith('ERR:'):
+                self._log(line, 'err')
+
+        if not self._read_until('DTC_READ_DONE', on_line):
+            self.root.after(0, lambda: self.dtc_status.config(text='Read failed - see log', fg='#f44747'))
+            return
+        rows = []
+        for code, methods in found.items():
+            desc, blink = describe_dtc(code)
+            state = 'PENDING' if methods == {'OBD_07'} else 'STORED'
+            rows.append((code, desc, blink, state))
+        if not answered[0] and not rows:
+            msg, color = 'ECU did not answer - ignition on? cable connected?', '#f44747'
+        elif not rows:
+            msg, color = '✅ No fault codes stored', '#4ec9b0'
+        else:
+            msg, color = (f'{len(rows)} fault code(s) found. STORED = in the ECU memory, '
+                          f'PENDING = seen once, not confirmed yet.'), '#f44747'
+        self._log(msg, 'ok' if color == '#4ec9b0' else 'err')
+
+        def show():
+            self.dtc_tree.delete(*self.dtc_tree.get_children())
+            for r in rows:
+                self.dtc_tree.insert('', 'end', values=r)
+            self.dtc_status.config(text=msg, fg=color)
+        self.root.after(0, show)
+
+    def _diag_clear_codes(self):
+        if self.op_busy or self.connected:
+            return
+        if not messagebox.askyesno('Clear fault codes',
+                                   'Delete all stored fault codes from the ECU memory?\n\n'
+                                   'A fault that is still present comes back right away.'):
+            return
+
+        def work():
+            self._log('\n---------- Clear fault codes ----------', 'info')
+            self._send('DTC_CLEAR:OBD')
+            result = {}
+
+            def on_line(line):
+                if line.startswith('CLEAR:OBD:'):
+                    result['r'] = line[len('CLEAR:OBD:'):]
+                self._log(line, 'data')
+
+            if not self._read_until('CLEAR:OBD:', on_line):
+                return
+            if result.get('r') != 'OK':
+                self._log(f'❌ Clear failed ({result.get("r")})', 'err')
+                self.root.after(0, lambda: self.dtc_status.config(
+                    text=f'Clear failed ({result.get("r")})', fg='#f44747'))
+                return
+            self._log('✅ Fault codes cleared - reading again...', 'ok')
+            time.sleep(0.5)
+            self._read_codes_worker()
+        self._diag_op(work)
+
+    def _open_code_list(self):
+        win = tk.Toplevel(self.root)
+        win.title('Fault code list')
+        win.geometry('720x520')
+        win.configure(bg='#1e1e1e')
+        q = tk.StringVar()
+        row = tk.Frame(win, bg='#1e1e1e')
+        row.pack(fill='x', padx=10, pady=8)
+        tk.Label(row, text='Search (code, text or blink code):', bg='#1e1e1e',
+                 fg='#cccccc', font=('Consolas', 9)).pack(side='left')
+        ent = tk.Entry(row, textvariable=q, bg='#3c3c3c', fg='white',
+                       insertbackground='white', font=('Consolas', 10))
+        ent.pack(side='left', fill='x', expand=True, padx=8)
+        tree = ttk.Treeview(win, style='Diag.Treeview', columns=('code', 'desc', 'blink'),
+                            show='headings')
+        for col, text, width in (('code', 'Code', 70), ('desc', 'Description', 480),
+                                 ('blink', 'Blink code', 110)):
+            tree.heading(col, text=text, anchor='w')
+            tree.column(col, width=width, anchor='w')
+        tree.pack(fill='both', expand=True, padx=10, pady=(0, 10))
+
+        def refresh(*_):
+            s = q.get().strip().lower()
+            tree.delete(*tree.get_children())
+            for code in sorted(DTC_DESCRIPTIONS):
+                desc, blink = DTC_DESCRIPTIONS[code]
+                if not s or s in code.lower() or s in desc.lower() or s in blink.lower():
+                    tree.insert('', 'end', values=(code, desc, blink))
+        q.trace_add('write', refresh)
+        refresh()
+        ent.focus_set()
+
+    # ---------------- ECU info / flash session ----------------
+    def _diag_read_info(self):
+        def work():
+            self._log('\n---------- Read ECU info ----------', 'info')
+            self._send('INFO')
+            no_answer = [False]
+
+            def on_line(line):
+                for key, var in (('INFO:VIN:', self.vin_var), ('INFO:CAL:', self.cal_var),
+                                 ('INFO:DATE:', self.date_var), ('INFO:VER:', self.ver_var)):
+                    if line.startswith(key):
+                        val = line[len(key):]
+                        self.root.after(0, var.set, val)
+                if line == 'ERR:ECU_NO_RESPONSE':
+                    no_answer[0] = True
+                self._log(line, 'err' if line.startswith('ERR:') else 'ok')
+
+            if self._read_until('INFO_DONE', on_line) and no_answer[0]:
+                self._log('❌ ECU not answering - ignition on? cable connected?', 'err')
+        self._diag_op(work)
+
+    def _end_flash_session(self):
+        if self.op_busy or not self.connected:
+            return
+        if not messagebox.askyesno(
+                'End flash session',
+                'Only do this when no read or write is running.\n\n'
+                'After a write: switch the ignition OFF, wait 10 seconds and switch it '
+                'ON again before using diagnostics.\n\nEnd the flash session now?'):
+            return
+
+        def work():
+            self._set_busy(True)
+            try:
+                if not self._ensure_serial():
                     return
-                if line.startswith('ERR:'):
-                    dtc_status.config(text=line)
-                    return
-            dtc_status.config(text='Timeout - no response received')
-
-        btns = tk.Frame(dtc_frame, bg='#1e1e1e')
-        btns.pack(fill='x', padx=6, pady=(0, 6))
-        tk.Button(btns, text='Read trouble codes', command=lambda: threading.Thread(
-            target=read_dtcs, daemon=True).start(),
-            bg='#0078d4', fg='white', relief='flat', padx=8).pack(side='left')
-        tk.Button(btns, text='Clear trouble codes', command=lambda: threading.Thread(
-            target=clear_dtcs, daemon=True).start(),
-            bg='#c84b2f', fg='white', relief='flat', padx=8).pack(side='left', padx=6)
-
-        live_frame = tk.LabelFrame(win, text='Live Data', bg='#1e1e1e',
-                                    fg='#cccccc', font=('Consolas', 9))
-        live_frame.pack(fill='x', padx=10, pady=6)
-
-        rpm_var = tk.StringVar(value='---')
-        temp_var = tk.StringVar(value='---')
-        map_var = tk.StringVar(value='---')
-
-        grid = tk.Frame(live_frame, bg='#1e1e1e')
-        grid.pack(padx=6, pady=6)
-        for i, (label, var) in enumerate([('RPM', rpm_var), ('Temp', temp_var),
-                                           ('MAP', map_var)]):
-            tk.Label(grid, text=label + ':', bg='#1e1e1e', fg='#888888',
-                     font=('Consolas', 11)).grid(row=i, column=0, sticky='w', padx=4, pady=2)
-            tk.Label(grid, textvariable=var, bg='#1e1e1e', fg='#4ec9b0',
-                     font=('Consolas', 14, 'bold')).grid(row=i, column=1, sticky='w', padx=8)
-
-        live_running = {'on': False}
-
-        def live_poll():
-            while live_running['on']:
-                self._send('LIVE_READ')
-                deadline = time.time() + 1.5
+                self._send('ECU_RELEASE')
+                deadline = time.time() + 3
                 while time.time() < deadline:
                     line = self._read_line(timeout=0.5)
                     if line is None:
                         continue
-                    if line.startswith('LIVE:'):
-                        parts = line.split(':')
-                        try:
-                            rpm_var.set(parts[2])
-                            temp_var.set(parts[4])
-                            map_var.set(parts[6])
-                        except Exception:
-                            pass
+                    if line == 'STATUS:ECU_RELEASED':
+                        self.connected = False
+                        self.status_label.config(text='● Disconnected', fg='#888888')
+                        self._log('Flash session ended - diagnostics can be used', 'ok')
                         break
-                time.sleep(0.3)
+                    if line == 'ERR:BUSY':
+                        self._log('ERR: a read/write is still running', 'err')
+                        break
+                else:
+                    self._log('ERR: no answer - is the firmware version 2.0 or newer?', 'err')
+            finally:
+                self._set_busy(False)
+        threading.Thread(target=work, daemon=True).start()
 
-        def toggle_live():
-            live_running['on'] = not live_running['on']
-            if live_running['on']:
-                live_btn.config(text='Stop Live Data', bg='#c84b2f')
-                threading.Thread(target=live_poll, daemon=True).start()
-            else:
-                live_btn.config(text='Start Live Data', bg='#107c10')
-
-        live_btn = tk.Button(live_frame, text='Start Live Data',
-                              command=toggle_live, bg='#107c10', fg='white',
-                              relief='flat', padx=8)
-        live_btn.pack(anchor='w', padx=6, pady=(0, 6))
-
-        def on_close():
-            live_running['on'] = False
-            win.destroy()
-        win.protocol('WM_DELETE_WINDOW', on_close)
-
+    def _on_close(self):
+        if self.live_on:
+            try:
+                self._send('DIAG_LIVE:0')
+            except Exception:
+                pass
+            self.live_on = False
+        self.root.destroy()
 
 if __name__ == '__main__':
     try:

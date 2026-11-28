@@ -36,7 +36,6 @@ const char WEB_PAGE[] PROGMEM = R"HTML(
   .read { background:#107c10; }
   .write { background:#c84b2f; }
   .sd { background:#3c3c3c; font-size:13px; padding:9px; }
-  .diag { background:#6b3fa0; }
   .upload { background:#0078d4; }
   .reset { background:#8a6d00; font-size:13px; padding:9px; margin-top:18px; }
   #status { background:#0d0d0d; border:1px solid #3c3c3c; border-radius:6px;
@@ -60,7 +59,6 @@ const char WEB_PAGE[] PROGMEM = R"HTML(
   .row2 { display:flex; gap:6px; }
   .row2 .btn { flex:1; }
   .warn { color:#f0a500; font-size:11px; }
-  .liveval { color:#4ec9b0; font-size:20px; font-weight:bold; }
   .wiringbtn { background:#3c3c3c; font-size:13px; padding:9px; }
   #wiring { display:none; background:#252526; border-radius:6px; padding:10px; margin:6px 0; }
   #wiring img { width:100%; height:auto; background:#fff; border-radius:4px; }
@@ -118,22 +116,6 @@ const char WEB_PAGE[] PROGMEM = R"HTML(
   <div class="warn" style="margin-top:8px">The ESP32/transceiver GND MUST be connected to ECU GND (M4), otherwise CAN will not work. CAN speed is 500 kbit/s. Make sure the connector and cables cannot move while writing.</div>
 </div>
 
-<details>
-  <summary>Diagnostics (speculative, unconfirmed)</summary>
-  <div class="warn">These commands have not yet been confirmed from a CAN log - may not work.</div>
-  <div class="row2">
-    <button class="btn diag" onclick="dtcRead()">Read trouble codes</button>
-    <button class="btn diag" style="background:#c84b2f" onclick="dtcClear()">Clear trouble codes</button>
-  </div>
-  <ul id="dtclist"></ul>
-  <button id="btnLive" class="btn diag" onclick="toggleLive()">Start Live Data</button>
-  <div class="infogrid">
-    <div class="infocell"><div class="lbl">RPM</div><div class="liveval" id="liveRpm">---</div></div>
-    <div class="infocell"><div class="lbl">Temp</div><div class="liveval" id="liveTemp">---</div></div>
-    <div class="infocell"><div class="lbl">MAP</div><div class="liveval" id="liveMap">---</div></div>
-  </div>
-</details>
-
 <button id="btnReset" class="btn reset" onclick="doReset()">RESET ESP32</button>
 
 <script>
@@ -141,7 +123,6 @@ let sdFiles = [];
 let selectedFile = null;
 let connected = false;
 let sdReady = false;
-let liveOn = false;
 let wasBusy = false;
 
 function setBusy(busy) {
@@ -265,43 +246,6 @@ function deleteSelected() {
   });
 }
 
-function dtcRead() {
-  let ul = document.getElementById('dtclist');
-  ul.innerHTML = '<li>Reading...</li>';
-  fetch('/dtcread').then(r => r.json()).then(codes => {
-    ul.innerHTML = '';
-    codes.forEach(c => {
-      let li = document.createElement('li');
-      li.innerText = c;
-      ul.appendChild(li);
-    });
-    if (codes.length === 0) ul.innerHTML = '<li>No trouble codes found</li>';
-  });
-}
-
-function dtcClear() {
-  if (!confirm('Clear all trouble codes?')) return;
-  fetch('/dtcclear').then(() => {
-    document.getElementById('dtclist').innerHTML = '<li>Cleared</li>';
-  });
-}
-
-function toggleLive() {
-  liveOn = !liveOn;
-  document.getElementById('btnLive').innerText = liveOn ? 'Stop Live Data' : 'Start Live Data';
-  if (liveOn) livePoll();
-}
-
-function livePoll() {
-  if (!liveOn) return;
-  fetch('/liveread').then(r => r.json()).then(d => {
-    document.getElementById('liveRpm').innerText = d.rpm;
-    document.getElementById('liveTemp').innerText = d.temp;
-    document.getElementById('liveMap').innerText = d.map;
-    if (liveOn) setTimeout(livePoll, 500);
-  });
-}
-
 setBusy(false);
 poll();
 </script>
@@ -378,6 +322,15 @@ void webTaskFn(void* param) {
 
 void startWebTask(String cmd) {
   if (webOpRunning) return;
+  // Safety lock: never start a flash operation while diagnostics is
+  // using the bus (see diagnostics.h).
+  if (diagActive()) {
+    webStatusText = "Diagnostics is running - stop live data in the app first";
+    return;
+  }
+  // Set before the task starts, so loop() stops touching the CAN bus
+  // right away (the task runs on the other CPU core).
+  webOpRunning = true;
   String* param = new String(cmd);
   xTaskCreatePinnedToCore(webTaskFn, "webOp", 8192, param, 1, NULL, 0);
 }
@@ -479,49 +432,6 @@ void handleSDDelete() {
   }
 }
 
-// -------- Diagnostics (just as speculative as the Serial version) --------
-
-void handleDTCRead() {
-  String json = "[";
-  bool first = true;
-  uint8_t resp[8];
-  send8(0x03, 0x18, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00);
-  if (waitResponse(resp, 1000) && resp[0] != 0x7F) {
-    uint16_t code = (resp[1] << 8) | resp[2];
-    if (code != 0x0000 && code != 0xFFFF) {
-      json += "\"0x" + String(code, HEX) + "\"";
-      first = false;
-    }
-  }
-  json += "]";
-  webServer.send(200, "application/json", json);
-}
-
-void handleDTCClear() {
-  uint8_t resp[8];
-  send8(0x03, 0x14, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00);
-  waitResponse(resp, 1000);
-  webServer.send(200, "text/plain", "OK");
-}
-
-void handleLiveRead() {
-  uint8_t resp[8];
-  auto readOne = [&](uint8_t lid, uint16_t& out) -> bool {
-    send8(0x02, 0x21, lid, 0x00, 0x00, 0x00, 0x00, 0x00);
-    if (!waitResponse(resp, 300) || resp[0] == 0x7F) return false;
-    out = (resp[2] << 8) | resp[3];
-    return true;
-  };
-  uint16_t rpm = 0, temp = 0, mapv = 0;
-  bool okR = readOne(0x01, rpm);
-  bool okT = readOne(0x02, temp);
-  bool okM = readOne(0x03, mapv);
-  String json = "{\"rpm\":\"" + (okR ? String(rpm) : String("ERR")) + "\",";
-  json += "\"temp\":\"" + (okT ? String(temp) : String("ERR")) + "\",";
-  json += "\"map\":\"" + (okM ? String(mapv) : String("ERR")) + "\"}";
-  webServer.send(200, "application/json", json);
-}
-
 // Restarts the ESP32. The response is sent first so the browser gets an
 // answer before the WiFi access point goes down.
 void handleReset() {
@@ -542,9 +452,6 @@ void setupWebUI() {
   webServer.on("/status", handleStatus);
   webServer.on("/sdlist", handleSDList);
   webServer.on("/sddelete", handleSDDelete);
-  webServer.on("/dtcread", handleDTCRead);
-  webServer.on("/dtcclear", handleDTCClear);
-  webServer.on("/liveread", handleLiveRead);
   webServer.on("/reset", handleReset);
   webServer.begin();
   Out.println("STATUS:WEBSERVER_STARTED");
